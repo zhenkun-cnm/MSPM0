@@ -1,0 +1,5 @@
+# Keil Build Output  
+board/empty/keil/Objects/  
+board/empty/keil/*.lst  
+board/empty/keil/*.map  
+board/empty/keil/.vscode/  

@@ -1,0 +1,14 @@
+*** Using Compiler 'V6.24', folder: 'D:\Keil\V5.4\ARM\ARMCLANG\Bin'
+Build target 'empty_LP_MSPM0G3507_nortos_keil'
+Note: source file '..\port\src\port_imu.c' - object file renamed from '.\Objects\port_imu.o' to '.\Objects\port_imu_1.o'.Before Build - User command #1: cmd.exe /C "C:\ti\mspm0_sdk_2_10_00_04\tools\keil\syscfg.bat 'c:\ti\mspm0_project\board\empty\keil\' empty.syscfg"
+Using Sysconfig Tool from "C:\ti\sysconfig_1.27.1\sysconfig_cli.bat"
+"Update the file located at <sdk path>/tools/keil/syscfg.bat to use a different version"
+"Couldn't find .metadata\product.json"
+Invalid argument '-s': File "c:\.metadata\product.json" does not exist
+compiling dev_menu.c...
+compiling app_tft.c...
+linking...
+Program Size: Code=33924 RO-data=3080 RW-data=16 ZI-data=13920  
+FromELF: creating hex file...
+".\Objects\empty_LP_MSPM0G3507_nortos_keil.axf" - 0 Error(s), 0 Warning(s).
+Build Time Elapsed:  00:00:05

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Lenovo/Downloads/**)",
+      "Read(//c/Users/Lenovo/.claude/skills/**)",
+      "Read(//d/Skill/**)",
+      "Edit(~/.claude/skills/datasheet-reader/**)"
+    ],
+    "additionalDirectories": [
+      "D:\\Skill",
+      "C:\\Users\\Lenovo\\Documents\\Cline\\Rules",
+      "c:\\ti\\mspm0_project"
+    ]
+  }
+}

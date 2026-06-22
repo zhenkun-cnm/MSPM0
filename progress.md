@@ -1,0 +1,128 @@
+# 进度日志 - MSPM0G3507 FreeRTOS 嵌入式系统
+
+## 会话 1 - 项目规划初始化
+
+**日期：** 2026-06-11  
+**目标：** 理解项目结构，建立规划文件，定义后续工作
+
+### 已完成
+- [x] 加载 planning-with-files-zh 技能
+- [x] 确认无现有规划文件
+- [x] 分析项目目录结构
+- [x] 读取 main() 启动流程
+- [x] 读取 app_init.c（任务创建逻辑）
+- [x] 读取 port_system.c（硬件初始化）
+- [x] 读取 port_imu.c（ICM-20948 SPI 驱动，351 行核心代码）
+- [x] 读取 app_imu.c（IMU 应用层任务）
+- [x] 读取 dev_imu.h（Device 层 OOP 接口）
+- [x] 创建 task_plan.md
+- [x] 创建 findings.md
+- [x] 创建 progress.md
+
+### 关键发现
+1. 项目采用四层解耦架构（HAL → Port → Device → APP）
+2. Device 层使用函数指针结构体 OOP 设计
+3. ICM-20948 使用软件 SPI (bit-bang)，非硬件 SPI
+4. Objects/ 目录有 .o 文件，证明编译过
+
+### 下一步
+- 深入检查 Encoder/Flash/LED 模块的 Device 层接口
+- 确认编译状态
+- 根据用户需求制定功能扩展计划
+
+---
+
+## 项目规划结果
+
+项目规划已完成。三个规划文件存储在 `c:\ti\mspm0_project\` 下：
+- **task_plan.md** - 阶段规划、决策记录、模块清单
+- **findings.md** - 架构分析、代码发现、硬件引脚总表  
+- **progress.md** - 会话进度日志（本文件）
+
+### 架构全貌
+四层解耦架构，5 个模块全部就绪，4 个外设驱动完成。
+
+---
+
+## 会话 2 - 添加 ST7735 TFT 彩屏驱动
+
+**日期：** 2026-06-22  
+**目标：** 为项目添加 0.96 寸 ST7735 TFT 彩屏驱动，至少支持字符串显示
+
+### 已完成
+- [x] 确认硬件引脚配置（PA17/SCK, PA18/MOSI, PB13/RES, PB12/DC, PB11/CS, PB10/BLK）
+- [x] 确认与 W25Q128 共用 SPI1 策略（CS 互斥）
+- [x] 确认用户要求：GPIO 默认全低电平，初始化时需纠正为工作电平
+- [x] 创建 `Device/inc/dev_tft.h` — Device 层 OOP 接口
+- [x] 创建 `board/empty/port/src/port_tft.c` — Port 层驱动实现（640+ 行）
+- [x] 创建 `board/empty/port/inc/port_tft.h` — Port 层头文件
+- [x] 创建 `APP/inc/app_tft.h` — 应用层任务声明
+- [x] 创建 `APP/src/app_tft.c` — 应用层任务实现
+- [x] 更新 `task_plan.md` — 新增 TFT 模块记录
+- [x] 更新 `progress.md` — 本日志
+
+### 关键发现
+1. `ti_msp_dl_config.h` 已有 LCD 引脚定义（通过 SysConfig 配置），可直接复用宏
+2. SPI1 已由 W25Q64_init() 初始化，TFT 复用同一硬件 SPI
+3. TFT 仅需 MOSI（单工写），不占用 MISO，但需等待并丢弃 RX FIFO 数据
+4. DC 引脚控制命令/数据切换，CS 引脚控制设备选择
+
+### 引脚电平初始化策略
+用户反馈各 GPIO 默认均为低电平，初始化时纠正：
+
+| 引脚 | 默认 | 初始化后 | 原因 |
+|------|------|---------|------|
+| PB13 RESET | 低 | 先低→延时→高 | 低有效复位，复位后恢复高 |
+| PB12 DC | 低 | 保持低 | 低=命令模式，初始化序列从命令开始 |
+| PB11 CS | 低 | 拉高 | 低有效片选，空闲不选中 |
+| PB10 BLK | 低 | 拉高 | 高=背光使能，点亮屏幕 |
+
+### 支持的功能
+- `init()` — 完整初始化（GPIO + 硬件复位 + SPI + ST7735 序列）
+- `fillScreen(color)` — 全屏填充
+- `drawPixel(x, y, color)` — 单点绘制
+- `fillRect(x, y, w, h, color)` — 矩形填充
+- `drawChar(x, y, ch, color, bg)` — ASCII 8×16 字符绘制
+- `printString(x, y, str, color, bg)` — 指定位置字符串
+- `setCursor(x, y)` + `print(str, color, bg)` — 流式打印
+
+### 错误记录
+- Lint 错误（include file not found）：VSCode IntelliSense 缺少 Keil include path，不影响实际编译（其他 port_xxx.c 同样引用且编译通过）
+
+### app_init.c 集成方式
+在 `start_task` 中添加（约第 N 行，创建其他任务处）：
+
+```c
+#include "app_tft.h"
+
+// 在 start_task 中创建：
+BaseType_t ret = xTaskCreate(tft_task, "tft", 512, NULL, 2, NULL);
+if (ret == pdPASS) {
+    LOG_INFO("[INIT] tft_task created (prio=2, 512w)\r\n");
+}
+```
+
+### 下一步
+1. 在 Keil 工程中添加 `port_tft.c`、`app_tft.c` 编译项
+2. 在 `app_init.c` 中引入并创建 `tft_task`
+3. 确认编译通过并烧录测试
+
+---
+
+## 后续会话模板
+
+### 会话 N - [标题]
+**日期：** YYYY-MM-DD  
+**目标：** [描述]
+
+#### 已完成
+- [ ] 
+
+#### 关键发现
+- 
+
+#### 错误记录
+- 
+
+#### 下一步
+-

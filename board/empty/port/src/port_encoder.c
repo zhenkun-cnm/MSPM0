@@ -176,6 +176,7 @@ static void enc_decode(uint32_t raw)
     uint8_t prev  = s_encDeb.lastStableAB;
     uint8_t idx   = (uint8_t)((prev << 2) | rawAB);
     int8_t  dir   = s_encGrayTable[idx];
+    dir = (int8_t)(-dir);   /* 左右方向对调（含菜单导航与 position 计数） */
 
     if (dir == 0) {
         /* 没有有效方向变化，检查是否与上次稳定值相同 */

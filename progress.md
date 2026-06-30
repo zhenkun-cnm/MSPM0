@@ -109,6 +109,35 @@ if (ret == pdPASS) {
 
 ---
 
+## 会话 3 - 添加独立按键任务（PA27/PB27）+ 编码器方向取反
+
+**日期：** 2026-06-22
+**目标：** 新增两个独立物理按键（PA27/PB27）的检测任务，支持短按/长按/双击，非阻塞，串口打印验证；顺便把编码器旋转方向左右对调
+
+### 已完成
+- [x] 确认 PA27/PB27 已在 syscfg/HAL 配置为输入（`BUTTON_BUTTON1_*` / `BUTTON_BUTTON2_*`，均低电平有效，PB27 外部上拉）
+- [x] 创建 `Device/inc/dev_button.h` — Device 层 OOP 接口（事件含按键 ID）
+- [x] 创建 `board/empty/port/inc/port_button.h` — Port 层头文件
+- [x] 创建 `board/empty/port/src/port_button.c` — Port 层驱动（移植编码器按键 FSM，扩展为两路数组）
+- [x] 创建 `APP/inc/app_button.h` + `APP/src/app_button.c` — 应用任务（5ms 轮询，drain 事件后 LOG_INFO）
+- [x] 修改 `APP/src/app_init.c` — 注册 button_task（prio=2, 256w）
+- [x] 修改 `board/empty/port/src/port_encoder.c` — `enc_decode()` 中 `dir = -dir` 实现方向取反（含菜单/position）
+- [x] 修改 Keil `.uvprojx` — App/Src 加 app_button.c，Port/Src 加 port_button.c
+- [x] UV4 无头编译通过：**0 Error(s), 1 Warning(s)**（warning 为既有 port_led.c LED_PORT 宏重定义，与本次无关）
+
+### 关键设计
+1. 复用 `port_encoder.c` 的按键五状态 FSM（IDLE/DEBOUNCE_DOWN/PRESSED/DEBOUNCE_UP/WAIT_DOUBLE）+ 环形队列，做成 `s_fsm[2]` 数组，每路按键各持一份独立状态
+2. 事件接口 `DevButton_Event_t {id, type}`，串口打印 `BTN1: SHORT_PRESS` / `BTN2: LONG_PRESS` 可区分两键
+3. 全程非阻塞：周期轮询 + FSM + 队列，无 busy-wait
+4. 时间阈值复用编码器：短按≤800ms / 长按≥1000ms / 双击间隔≤250ms / 消抖 2×5ms
+
+### 下一步（待硬件验证）
+1. 烧录后串口逐项验证 BTN1/BTN2 的短按/长按/双击打印
+2. 验证编码器方向：CW 现打印 LEFT、CCW 打印 RIGHT，菜单导航随之对调
+3. 若 PB27 误报/无反应 → 回退到代码强制内部上拉
+
+---
+
 ## 后续会话模板
 
 ### 会话 N - [标题]

@@ -56,6 +56,7 @@
 | **Flash** | dev_flash.h | port_flash.c | app_flash.c (flash_init_task) | ⚠️ 需验证 |
 | **IMU** | dev_imu.h | port_imu.c | app_imu.c (imu_task) | ✅ 完成 |
 | **TFT** | dev_tft.h | port_tft.c | app_tft.c (tft_task) | ✅ 新增 |
+| **Button** | dev_button.h | port_button.c | app_button.c (button_task) | ✅ 新增 |
 | **Log** | - | port_log.c | - | ✅ 完成 |
 
 ---
@@ -70,6 +71,7 @@
 | flash_init | 1 | 256w | 一次性 | Flash JEDEC ID 验证后删除 |
 | imu_task | 2 | 384w | 1000ms | ICM-20948 6 轴数据采集 |
 | tft_task | 2 | 512w | 1000ms | ST7735 TFT 字符串显示刷新 |
+| button_task | 2 | 256w | 5ms 轮询 | PA27/PB27 独立按键短按/长按/双击 |
 
 ---
 

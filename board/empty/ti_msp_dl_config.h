@@ -89,6 +89,59 @@ extern "C" {
 bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 
 
+/* Defines for DC_MOTOR */
+#define DC_MOTOR_INST                                                      TIMG0
+#define DC_MOTOR_INST_IRQHandler                                TIMG0_IRQHandler
+#define DC_MOTOR_INST_INT_IRQN                                  (TIMG0_INT_IRQn)
+#define DC_MOTOR_INST_CLK_FREQ                                          40000000
+/* GPIO defines for channel 0 */
+#define GPIO_DC_MOTOR_C0_PORT                                              GPIOA
+#define GPIO_DC_MOTOR_C0_PIN                                      DL_GPIO_PIN_12
+#define GPIO_DC_MOTOR_C0_IOMUX                                   (IOMUX_PINCM34)
+#define GPIO_DC_MOTOR_C0_IOMUX_FUNC                  IOMUX_PINCM34_PF_TIMG0_CCP0
+#define GPIO_DC_MOTOR_C0_IDX                                 DL_TIMER_CC_0_INDEX
+/* GPIO defines for channel 1 */
+#define GPIO_DC_MOTOR_C1_PORT                                              GPIOA
+#define GPIO_DC_MOTOR_C1_PIN                                      DL_GPIO_PIN_13
+#define GPIO_DC_MOTOR_C1_IOMUX                                   (IOMUX_PINCM35)
+#define GPIO_DC_MOTOR_C1_IOMUX_FUNC                  IOMUX_PINCM35_PF_TIMG0_CCP1
+#define GPIO_DC_MOTOR_C1_IDX                                 DL_TIMER_CC_1_INDEX
+
+
+
+
+/* Defines for TB6612_ENA */
+#define TB6612_ENA_INST                                                    TIMG8
+#define TB6612_ENA_INST_IRQHandler                              TIMG8_IRQHandler
+#define TB6612_ENA_INST_INT_IRQN                                (TIMG8_INT_IRQn)
+/* Pin configuration defines for TB6612_ENA PHA Pin */
+#define GPIO_TB6612_ENA_PHA_PORT                                           GPIOB
+#define GPIO_TB6612_ENA_PHA_PIN                                   DL_GPIO_PIN_15
+#define GPIO_TB6612_ENA_PHA_IOMUX                                (IOMUX_PINCM32)
+#define GPIO_TB6612_ENA_PHA_IOMUX_FUNC               IOMUX_PINCM32_PF_TIMG8_CCP0
+/* Pin configuration defines for TB6612_ENA PHB Pin */
+#define GPIO_TB6612_ENA_PHB_PORT                                           GPIOB
+#define GPIO_TB6612_ENA_PHB_PIN                                   DL_GPIO_PIN_16
+#define GPIO_TB6612_ENA_PHB_IOMUX                                (IOMUX_PINCM33)
+#define GPIO_TB6612_ENA_PHB_IOMUX_FUNC               IOMUX_PINCM33_PF_TIMG8_CCP1
+
+
+/* Defines for TB6612_ENB */
+#define TB6612_ENB_INST                                                  (TIMG7)
+#define TB6612_ENB_INST_IRQHandler                              TIMG7_IRQHandler
+#define TB6612_ENB_INST_INT_IRQN                                (TIMG7_INT_IRQn)
+#define TB6612_ENB_INST_LOAD_VALUE                                      (63999U)
+/* GPIO defines for channel 0 */
+#define GPIO_TB6612_ENB_C0_PORT                                            GPIOA
+#define GPIO_TB6612_ENB_C0_PIN                                    DL_GPIO_PIN_28
+#define GPIO_TB6612_ENB_C0_IOMUX                                  (IOMUX_PINCM3)
+#define GPIO_TB6612_ENB_C0_IOMUX_FUNC                 IOMUX_PINCM3_PF_TIMG7_CCP0
+#define TB6612_ENB_INST_PUB_0_CH                                             (1)
+
+
+
+
+
 /* Defines for sys_uart */
 #define sys_uart_INST                                                      UART0
 #define sys_uart_INST_FREQUENCY                                         40000000
@@ -127,6 +180,11 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define GPIO_W25Q64_IOMUX_SCLK                                  (IOMUX_PINCM39)
 #define GPIO_W25Q64_IOMUX_SCLK_FUNC                  IOMUX_PINCM39_PF_SPI1_SCLK
 
+
+
+/* Defines for DMA_CH0 */
+#define DMA_CH0_CHAN_ID                                                      (0)
+#define DMA_CH0_TRIGGER_SEL_FSUB_1                       (DMA_GENERIC_SUB1_TRIG)
 
 
 /* Port definition for Pin Group LED */
@@ -183,6 +241,33 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 /* Defines for LCD_BLK: GPIOB.10 with pinCMx 27 on package pin 62 */
 #define LCD_LCD_BLK_PIN                                         (DL_GPIO_PIN_10)
 #define LCD_LCD_BLK_IOMUX                                        (IOMUX_PINCM27)
+/* Defines for BUTTON1: GPIOA.27 with pinCMx 60 on package pin 31 */
+#define BUTTON_BUTTON1_PORT                                              (GPIOA)
+#define BUTTON_BUTTON1_PIN                                      (DL_GPIO_PIN_27)
+#define BUTTON_BUTTON1_IOMUX                                     (IOMUX_PINCM60)
+/* Defines for BUTTON2: GPIOB.27 with pinCMx 58 on package pin 29 */
+#define BUTTON_BUTTON2_PORT                                              (GPIOB)
+#define BUTTON_BUTTON2_PIN                                      (DL_GPIO_PIN_27)
+#define BUTTON_BUTTON2_IOMUX                                     (IOMUX_PINCM58)
+/* Defines for AIN1: GPIOA.22 with pinCMx 47 on package pin 18 */
+#define TB6612_AIN1_PORT                                                 (GPIOA)
+#define TB6612_AIN1_PIN                                         (DL_GPIO_PIN_22)
+#define TB6612_AIN1_IOMUX                                        (IOMUX_PINCM47)
+/* Defines for AIN2: GPIOB.21 with pinCMx 49 on package pin 20 */
+#define TB6612_AIN2_PORT                                                 (GPIOB)
+#define TB6612_AIN2_PIN                                         (DL_GPIO_PIN_21)
+#define TB6612_AIN2_IOMUX                                        (IOMUX_PINCM49)
+/* Defines for BIN1: GPIOB.23 with pinCMx 51 on package pin 22 */
+#define TB6612_BIN1_PORT                                                 (GPIOB)
+#define TB6612_BIN1_PIN                                         (DL_GPIO_PIN_23)
+#define TB6612_BIN1_IOMUX                                        (IOMUX_PINCM51)
+/* Defines for BIN2: GPIOA.23 with pinCMx 53 on package pin 24 */
+#define TB6612_BIN2_PORT                                                 (GPIOA)
+#define TB6612_BIN2_PIN                                         (DL_GPIO_PIN_23)
+#define TB6612_BIN2_IOMUX                                        (IOMUX_PINCM53)
+/* Defines for M_encoder: GPIOA.29 with pinCMx 4 on package pin 36 */
+#define ENCODER_M_encoder_PIN                                   (DL_GPIO_PIN_29)
+#define ENCODER_M_encoder_IOMUX                                   (IOMUX_PINCM4)
 
 
 
@@ -195,8 +280,12 @@ void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 
 bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
+void SYSCFG_DL_DC_MOTOR_init(void);
+void SYSCFG_DL_TB6612_ENA_init(void);
+void SYSCFG_DL_TB6612_ENB_init(void);
 void SYSCFG_DL_sys_uart_init(void);
 void SYSCFG_DL_W25Q64_init(void);
+void SYSCFG_DL_DMA_init(void);
 
 void SYSCFG_DL_SYSTICK_init(void);
 

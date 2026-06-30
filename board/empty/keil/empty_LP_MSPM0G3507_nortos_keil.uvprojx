@@ -314,7 +314,7 @@
           </ArmAdsMisc>
           <Cads>
             <interw>1</interw>
-            <Optim>3</Optim>
+            <Optim>1</Optim>
             <oTime>0</oTime>
             <SplitLS>0</SplitLS>
             <OneElfS>1</OneElfS>
@@ -470,6 +470,11 @@
           <GroupName>App/Src</GroupName>
           <Files>
             <File>
+              <FileName>app_button.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_button.c</FilePath>
+            </File>
+            <File>
               <FileName>app_encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_encoder.c</FilePath>
@@ -499,6 +504,16 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_tft.c</FilePath>
             </File>
+            <File>
+              <FileName>app_tb6612.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_tb6612.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_motor_encoder.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_motor_encoder.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -514,6 +529,11 @@
         <Group>
           <GroupName>Port/Src</GroupName>
           <Files>
+            <File>
+              <FileName>port_button.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_button.c</FilePath>
+            </File>
             <File>
               <FileName>port_encoder.c</FileName>
               <FileType>1</FileType>
@@ -548,6 +568,21 @@
               <FileName>port_tft.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\port\src\port_tft.c</FilePath>
+            </File>
+            <File>
+              <FileName>port_tb6612.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_tb6612.c</FilePath>
+            </File>
+            <File>
+              <FileName>port_motor_encoder.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_motor_encoder.c</FilePath>
+            </File>
+            <File>
+              <FileName>port_motor_encoder2.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_motor_encoder2.c</FilePath>
             </File>
           </Files>
         </Group>

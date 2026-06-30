@@ -40,6 +40,8 @@
 
 #include "ti_msp_dl_config.h"
 
+DL_TimerG_backupConfig gTB6612_ENABackup;
+DL_TimerG_backupConfig gTB6612_ENBBackup;
 DL_SPI_backupConfig gW25Q64Backup;
 
 /*
@@ -52,10 +54,17 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_GPIO_init();
     /* Module-Specific Initializations*/
     SYSCFG_DL_SYSCTL_init();
+    SYSCFG_DL_DC_MOTOR_init();
+    SYSCFG_DL_TB6612_ENA_init();
+    SYSCFG_DL_TB6612_ENB_init();
     SYSCFG_DL_sys_uart_init();
     SYSCFG_DL_W25Q64_init();
+    SYSCFG_DL_DMA_init();
     SYSCFG_DL_SYSTICK_init();
     /* Ensure backup structures have no valid state */
+
+	gTB6612_ENABackup.backupRdy 	= false;
+	gTB6612_ENBBackup.backupRdy 	= false;
 
 	gW25Q64Backup.backupRdy 	= false;
 
@@ -68,6 +77,8 @@ SYSCONFIG_WEAK bool SYSCFG_DL_saveConfiguration(void)
 {
     bool retStatus = true;
 
+	retStatus &= DL_TimerG_saveConfiguration(TB6612_ENA_INST, &gTB6612_ENABackup);
+	retStatus &= DL_TimerG_saveConfiguration(TB6612_ENB_INST, &gTB6612_ENBBackup);
 	retStatus &= DL_SPI_saveConfiguration(W25Q64_INST, &gW25Q64Backup);
 
     return retStatus;
@@ -78,6 +89,8 @@ SYSCONFIG_WEAK bool SYSCFG_DL_restoreConfiguration(void)
 {
     bool retStatus = true;
 
+	retStatus &= DL_TimerG_restoreConfiguration(TB6612_ENA_INST, &gTB6612_ENABackup, false);
+	retStatus &= DL_TimerG_restoreConfiguration(TB6612_ENB_INST, &gTB6612_ENBBackup, false);
 	retStatus &= DL_SPI_restoreConfiguration(W25Q64_INST, &gW25Q64Backup);
 
     return retStatus;
@@ -87,14 +100,22 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
 {
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
+    DL_TimerG_reset(DC_MOTOR_INST);
+    DL_TimerG_reset(TB6612_ENA_INST);
+    DL_TimerG_reset(TB6612_ENB_INST);
     DL_UART_Main_reset(sys_uart_INST);
     DL_SPI_reset(W25Q64_INST);
 
 
+
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
+    DL_TimerG_enablePower(DC_MOTOR_INST);
+    DL_TimerG_enablePower(TB6612_ENA_INST);
+    DL_TimerG_enablePower(TB6612_ENB_INST);
     DL_UART_Main_enablePower(sys_uart_INST);
     DL_SPI_enablePower(W25Q64_INST);
+
 
     delay_cycles(POWER_STARTUP_DELAY);
 }
@@ -104,6 +125,24 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 
     DL_GPIO_initPeripheralAnalogFunction(GPIO_HFXIN_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GPIO_HFXOUT_IOMUX);
+
+    DL_GPIO_initPeripheralOutputFunction(GPIO_DC_MOTOR_C0_IOMUX,GPIO_DC_MOTOR_C0_IOMUX_FUNC);
+    DL_GPIO_enableOutput(GPIO_DC_MOTOR_C0_PORT, GPIO_DC_MOTOR_C0_PIN);
+    DL_GPIO_initPeripheralOutputFunction(GPIO_DC_MOTOR_C1_IOMUX,GPIO_DC_MOTOR_C1_IOMUX_FUNC);
+    DL_GPIO_enableOutput(GPIO_DC_MOTOR_C1_PORT, GPIO_DC_MOTOR_C1_PIN);
+
+    DL_GPIO_initPeripheralInputFunction(GPIO_TB6612_ENA_PHB_IOMUX,GPIO_TB6612_ENA_PHB_IOMUX_FUNC);
+    
+	DL_GPIO_initPeripheralInputFunctionFeatures(
+		 GPIO_TB6612_ENA_PHA_IOMUX, GPIO_TB6612_ENA_PHA_IOMUX_FUNC,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
+    
+	DL_GPIO_initPeripheralInputFunctionFeatures(
+		 GPIO_TB6612_ENB_C0_IOMUX, GPIO_TB6612_ENB_C0_IOMUX_FUNC,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
     
 	DL_GPIO_initPeripheralOutputFunction(
@@ -154,8 +193,32 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 
     DL_GPIO_initDigitalOutput(LCD_LCD_BLK_IOMUX);
 
-    DL_GPIO_clearPins(GPIOA, CS_SPI1_CS_PIN);
-    DL_GPIO_enableOutput(GPIOA, CS_SPI1_CS_PIN);
+    DL_GPIO_initDigitalInputFeatures(BUTTON_BUTTON1_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
+    DL_GPIO_initDigitalInputFeatures(BUTTON_BUTTON2_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
+    DL_GPIO_initDigitalOutput(TB6612_AIN1_IOMUX);
+
+    DL_GPIO_initDigitalOutput(TB6612_AIN2_IOMUX);
+
+    DL_GPIO_initDigitalOutput(TB6612_BIN1_IOMUX);
+
+    DL_GPIO_initDigitalOutput(TB6612_BIN2_IOMUX);
+
+    DL_GPIO_initDigitalInputFeatures(ENCODER_M_encoder_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
+    DL_GPIO_clearPins(GPIOA, CS_SPI1_CS_PIN |
+		TB6612_AIN1_PIN |
+		TB6612_BIN2_PIN);
+    DL_GPIO_enableOutput(GPIOA, CS_SPI1_CS_PIN |
+		TB6612_AIN1_PIN |
+		TB6612_BIN2_PIN);
     DL_GPIO_clearPins(GPIOB, LED_PIN_22_PIN |
 		ICM_ICM_MOSI_PIN |
 		ICM_ICM_CS_PIN |
@@ -163,7 +226,9 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		LCD_LCD_RES_PIN |
 		LCD_LCD_DC_PIN |
 		LCD_LCD_CS_PIN |
-		LCD_LCD_BLK_PIN);
+		LCD_LCD_BLK_PIN |
+		TB6612_AIN2_PIN |
+		TB6612_BIN1_PIN);
     DL_GPIO_enableOutput(GPIOB, LED_PIN_22_PIN |
 		ICM_ICM_MOSI_PIN |
 		ICM_ICM_CS_PIN |
@@ -171,7 +236,9 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		LCD_LCD_RES_PIN |
 		LCD_LCD_DC_PIN |
 		LCD_LCD_CS_PIN |
-		LCD_LCD_BLK_PIN);
+		LCD_LCD_BLK_PIN |
+		TB6612_AIN2_PIN |
+		TB6612_BIN1_PIN);
 
 }
 
@@ -287,6 +354,119 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
 }
 
 
+/*
+ * Timer clock configuration to be sourced by  / 1 (40000000 Hz)
+ * timerClkFreq = (timerClkSrc / (timerClkDivRatio * (timerClkPrescale + 1)))
+ *   40000000 Hz = 40000000 Hz / (1 * (0 + 1))
+ */
+static const DL_TimerG_ClockConfig gDC_MOTORClockConfig = {
+    .clockSel = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
+    .prescale = 0U
+};
+
+static const DL_TimerG_PWMConfig gDC_MOTORConfig = {
+    .pwmMode = DL_TIMER_PWM_MODE_EDGE_ALIGN_UP,
+    .period = 4000,
+    .isTimerWithFourCC = false,
+    .startTimer = DL_TIMER_START,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_DC_MOTOR_init(void) {
+
+    DL_TimerG_setClockConfig(
+        DC_MOTOR_INST, (DL_TimerG_ClockConfig *) &gDC_MOTORClockConfig);
+
+    DL_TimerG_initPWMMode(
+        DC_MOTOR_INST, (DL_TimerG_PWMConfig *) &gDC_MOTORConfig);
+
+    // Set Counter control to the smallest CC index being used
+    DL_TimerG_setCounterControl(DC_MOTOR_INST,DL_TIMER_CZC_CCCTL0_ZCOND,DL_TIMER_CAC_CCCTL0_ACOND,DL_TIMER_CLC_CCCTL0_LCOND);
+
+    DL_TimerG_setCaptureCompareOutCtl(DC_MOTOR_INST, DL_TIMER_CC_OCTL_INIT_VAL_LOW,
+		DL_TIMER_CC_OCTL_INV_OUT_DISABLED, DL_TIMER_CC_OCTL_SRC_FUNCVAL,
+		DL_TIMERG_CAPTURE_COMPARE_0_INDEX);
+
+    DL_TimerG_setCaptCompUpdateMethod(DC_MOTOR_INST, DL_TIMER_CC_UPDATE_METHOD_IMMEDIATE, DL_TIMERG_CAPTURE_COMPARE_0_INDEX);
+    DL_TimerG_setCaptureCompareValue(DC_MOTOR_INST, 0, DL_TIMER_CC_0_INDEX);
+
+    DL_TimerG_setCaptureCompareOutCtl(DC_MOTOR_INST, DL_TIMER_CC_OCTL_INIT_VAL_LOW,
+		DL_TIMER_CC_OCTL_INV_OUT_DISABLED, DL_TIMER_CC_OCTL_SRC_FUNCVAL,
+		DL_TIMERG_CAPTURE_COMPARE_1_INDEX);
+
+    DL_TimerG_setCaptCompUpdateMethod(DC_MOTOR_INST, DL_TIMER_CC_UPDATE_METHOD_IMMEDIATE, DL_TIMERG_CAPTURE_COMPARE_1_INDEX);
+    DL_TimerG_setCaptureCompareValue(DC_MOTOR_INST, 0, DL_TIMER_CC_1_INDEX);
+
+    DL_TimerG_enableClock(DC_MOTOR_INST);
+
+
+    
+    DL_TimerG_setCCPDirection(DC_MOTOR_INST , DL_TIMER_CC0_OUTPUT | DL_TIMER_CC1_OUTPUT );
+
+
+}
+
+
+static const DL_TimerG_ClockConfig gTB6612_ENAClockConfig = {
+    .clockSel = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
+    .prescale = 0U
+};
+
+
+SYSCONFIG_WEAK void SYSCFG_DL_TB6612_ENA_init(void) {
+
+    DL_TimerG_setClockConfig(
+        TB6612_ENA_INST, (DL_TimerG_ClockConfig *) &gTB6612_ENAClockConfig);
+
+    DL_TimerG_configQEI(TB6612_ENA_INST, DL_TIMER_QEI_MODE_2_INPUT,
+        DL_TIMER_CC_INPUT_INV_NOINVERT, DL_TIMER_CC_0_INDEX);
+    DL_TimerG_configQEI(TB6612_ENA_INST, DL_TIMER_QEI_MODE_2_INPUT,
+        DL_TIMER_CC_INPUT_INV_NOINVERT, DL_TIMER_CC_1_INDEX);
+    DL_TimerG_setLoadValue(TB6612_ENA_INST, 65535);
+    DL_TimerG_enableClock(TB6612_ENA_INST);
+}
+
+
+
+/*
+ * Timer clock configuration to be sourced by BUSCLK /  (80000000 Hz)
+ * timerClkFreq = (timerClkSrc / (timerClkDivRatio * (timerClkPrescale + 1)))
+ *   80000000 Hz = 80000000 Hz / (1 * (0 + 1))
+ */
+static const DL_TimerG_ClockConfig gTB6612_ENBClockConfig = {
+    .clockSel    = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
+    .prescale = 0U
+};
+
+/*
+ * Timer load value (where the counter starts from) is calculated as (timerPeriod * timerClockFreq) - 1
+ * TB6612_ENB_INST_LOAD_VALUE = (0.8ms * 80000000 Hz) - 1
+ */
+static const DL_TimerG_CaptureConfig gTB6612_ENBCaptureConfig = {
+    .captureMode    = DL_TIMER_CAPTURE_MODE_EDGE_TIME,
+    .period         = TB6612_ENB_INST_LOAD_VALUE,
+    .startTimer     = DL_TIMER_STOP,
+    .edgeCaptMode   = DL_TIMER_CAPTURE_EDGE_DETECTION_MODE_RISING,
+    .inputChan      = DL_TIMER_INPUT_CHAN_0,
+    .inputInvMode   = DL_TIMER_CC_INPUT_INV_NOINVERT,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_TB6612_ENB_init(void) {
+
+    DL_TimerG_setClockConfig(TB6612_ENB_INST,
+        (DL_TimerG_ClockConfig *) &gTB6612_ENBClockConfig);
+
+    DL_TimerG_initCaptureMode(TB6612_ENB_INST,
+        (DL_TimerG_CaptureConfig *) &gTB6612_ENBCaptureConfig);
+    DL_TimerG_enableClock(TB6612_ENB_INST);
+
+    DL_TimerG_enableEvent(TB6612_ENB_INST, DL_TIMERG_EVENT_ROUTE_1, (DL_TIMERG_EVENT_CC0_DN_EVENT));
+
+    DL_TimerG_setPublisherChanID(TB6612_ENB_INST, DL_TIMERG_PUBLISHER_INDEX_0, TB6612_ENB_INST_PUB_0_CH);
+}
+
 static const DL_UART_Main_ClockConfig gsys_uartClockConfig = {
     .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
     .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
@@ -350,6 +530,26 @@ SYSCONFIG_WEAK void SYSCFG_DL_W25Q64_init(void) {
     /* Enable module */
     DL_SPI_enable(W25Q64_INST);
 }
+
+static const DL_DMA_Config gDMA_CH0Config = {
+    .transferMode   = DL_DMA_SINGLE_TRANSFER_MODE,
+    .extendedMode   = DL_DMA_NORMAL_MODE,
+    .destIncrement  = DL_DMA_ADDR_INCREMENT,
+    .srcIncrement   = DL_DMA_ADDR_UNCHANGED,
+    .destWidth      = DL_DMA_WIDTH_WORD,
+    .srcWidth       = DL_DMA_WIDTH_WORD,
+    .trigger        = DMA_CH0_TRIGGER_SEL_FSUB_1,
+    .triggerType    = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_DMA_CH0_init(void)
+{
+    DL_DMA_initChannel(DMA, DMA_CH0_CHAN_ID , (DL_DMA_Config *) &gDMA_CH0Config);
+}
+SYSCONFIG_WEAK void SYSCFG_DL_DMA_init(void){
+    SYSCFG_DL_DMA_CH0_init();
+}
+
 
 SYSCONFIG_WEAK void SYSCFG_DL_SYSTICK_init(void)
 {

@@ -44,6 +44,16 @@ static uint32_t s_readIndex = 0;
  */
 static bool s_firstPoll = true;
 
+/**
+ * @brief 诊断计数器 (每 100 次 Poll 打印一次 DMA 状态, 即每 1 秒)
+ */
+static uint32_t s_diagCounter = 0;
+
+/**
+ * @brief 上一次 Poll 的 writeOffset, 用于检测是否有新数据传输
+ */
+static uint32_t s_lastWriteOffset = 0;
+
 /* ================================================================
  *  获取 DMA 硬件写指针偏移
  * ================================================================ */
@@ -51,23 +61,16 @@ static bool s_firstPoll = true;
 uint32_t PORT_MOTOR_ENCODER2_GetDmaWriteOffset(void)
 {
     /*
-     * DMA 目的地址寄存器保存的是"下一次写入的地址"。
-     * 通过计算 (当前目的地址 - 缓冲区基址) / sizeof(条目) 得到已写入条目数。
+     * DMA 循环模式: DL_DMA_getTransferSize() 返回当前循环剩余传输次数。
+     * 已写入条目数 = 总大小 - 剩余次数。
      *
-     * 注意: MSPM0 DMA 目的地址在每次传输后递增 sizeof(destWidth) 字节。
-     * destWidth = DL_DMA_WIDTH_WORD = 4 字节。
+     * 例如: ENC2_BUF_SIZE=256, remaining=200 → 已写入 56 条 → offset=56。
+     *
+     * 注意: 只有循环模式/Circular 下 getTransferSize 才持续有效。
+     * NORMAL 模式下传完 256 次后返回 0, 不代表写入 256 条。
      */
-    uint32_t destAddr = DL_DMA_getDestAddr(DMA, DMA_CH0_CHAN_ID);
-    uint32_t baseAddr = (uint32_t)&g_enc2Buffer[0];
-    uint32_t offset   = (destAddr - baseAddr) / sizeof(uint32_t);
-
-    /*
-     * 如果 offset 超出缓冲区范围 (DMA 已绕回但 SDM 未取模),
-     * 说明 DMA 已写满一整圈。此时对缓冲区大小取模。
-     */
-    if (offset >= ENC2_BUF_SIZE) {
-        offset %= ENC2_BUF_SIZE;
-    }
+    uint16_t remaining = DL_DMA_getTransferSize(DMA, DMA_CH0_CHAN_ID);
+    uint32_t offset    = (ENC2_BUF_SIZE - remaining) % ENC2_BUF_SIZE;
 
     return offset;
 }
@@ -105,23 +108,30 @@ void PORT_MOTOR_ENCODER2_Init(void)
         (uint32_t)&g_enc2Buffer[0]);
 
     /*
-     * 4. 配置 DMA_CH0 传输大小
-     *    NORMAL 模式下, 传输 ENC2_BUF_SIZE 次后 DMA 自动停止。
-     *    由于缓冲区是 256 条, 10ms 轮询周期内最大脉冲数远小于 256,
-     *    每次 Poll 后软件将 DMA 目的地址重置为缓冲区基址,
-     *    实现软件控制的环形回绕。
-     *
-     *    备选方案: 使用 DMA 循环模式 (如需硬件自动回绕)。
+     * 4. DMA_CH0 循环模式 (DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE)
+     *    硬件自动回绕到缓冲区头部, 无需 CPU 干预。
+     *    TransferSize 由 SYSCFG_DL_DMA_CH0_init() 设置 (=256)。
      */
-    DL_DMA_setTransferSize(DMA, DMA_CH0_CHAN_ID, ENC2_BUF_SIZE);
 
     /*
-     * 5. 启动 DMA 通道 (使能触发响应)
+     * 5. 手动将 DMA 的 FSUB_1 (Generic Subscriber 1) 订阅到
+     *    Event Fabric 的 Publisher Channel 1。
+     *    TIMG7 通过 setPublisherChanID 发布事件到通道 1,
+     *    DMA 通过 setSubscriberChanID 订阅通道 1,
+     *    两者通过 Event Fabric 内部总线直连。
+     *
+     *    没有这一行: TIMG7 捕获事件产生但 DMA 收不到 (DMA-rem=256)。
+     *    加上这一行: PA28 上升沿 → TIMG7 → DMA → 自动搬运 GPIO 快照。
+     */
+    DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_1, 1);
+
+    /*
+     * 6. 启动 DMA 通道 (使能触发响应)
      */
     DL_DMA_enableChannel(DMA, DMA_CH0_CHAN_ID);
 
     /*
-     * 6. 启动 TIMG7 计数器
+     * 7. 启动 TIMG7 计数器
      *    SYSCFG_DL_TB6612_ENB_init() 已将 TIMG7 配置为 Edge-Time Capture 模式,
      *    但 startTimer = DL_TIMER_STOP。此处显式启动计数。
      *
@@ -131,6 +141,28 @@ void PORT_MOTOR_ENCODER2_Init(void)
      *      3. DMA 搬运 1 个 WORD: GPIOA->DIN31_0 → g_enc2Buffer[n]
      */
     DL_TimerG_startCounter(TB6612_ENB_INST);
+
+    /*
+     * 诊断: 验证 TIMG7 计数器是否在跑
+     * 延迟 1ms 后读两次 CTR, 差值应 > 0
+     */
+    uint16_t cnt1 = (uint16_t)(TIMG7->COUNTERREGS.CTR);
+    DL_Common_delayCycles(80000);  /* 1ms @ 80MHz */
+    uint16_t cnt2 = (uint16_t)(TIMG7->COUNTERREGS.CTR);
+    uint16_t cntDiff = cnt2 - cnt1;
+
+    LOG_INFO("[ENC2] CNT1=%u CNT2=%u diff=%u %s\r\n",
+        cnt1, cnt2, cntDiff,
+        (cntDiff > 0) ? "RUNNING" : "STOPPED");
+
+    /*
+     * 诊断: 打印 DMA 传输大小初始值
+     */
+    uint16_t dmaRem = DL_DMA_getTransferSize(DMA, DMA_CH0_CHAN_ID);
+    LOG_INFO("[ENC2] DMA remaining=%u src=0x%08lX dest=0x%08lX\r\n",
+        dmaRem,
+        (uint32_t)&GPIOA->DIN31_0,
+        (uint32_t)&g_enc2Buffer[0]);
 
     LOG_INFO("[ENC2] DMA-GPIO snapshot encoder initialized\r\n");
 }
@@ -160,6 +192,42 @@ void PORT_MOTOR_ENCODER2_Poll(int32_t *deltaPulses)
     {
         /* 无新数据 */
         *deltaPulses = 0;
+
+        /*
+         * 每 1 秒 (100 次 Poll) 打印一次诊断信息,
+         * 方便确认 DMA 是否在编码器转动时收到触发。
+         */
+        s_diagCounter++;
+        if (s_diagCounter >= 100U)
+        {
+            s_diagCounter = 0;
+
+            /* 读取 DMA 剩余传输次数 */
+            uint16_t dmaRem = DL_DMA_getTransferSize(DMA, DMA_CH0_CHAN_ID);
+            uint32_t offset = (ENC2_BUF_SIZE - dmaRem) % ENC2_BUF_SIZE;
+
+            /*
+             * 读取 TIMG7 中断标志位, 查看 CC0_DN_EVENT 是否触发过
+             * RIS (Raw Interrupt Status) 不需要中断使能即可读取
+             */
+            uint32_t timg7IIDX = TIMG7->CPU_INT.IIDX;
+            uint32_t timg7RIS  = TIMG7->CPU_INT.RIS;
+            uint16_t timg7CC0  = (uint16_t)DL_TimerG_getCaptureCompareValue(
+                                     TB6612_ENB_INST, DL_TIMER_CC_0_INDEX);
+            uint16_t timg7CTR  = (uint16_t)(TIMG7->COUNTERREGS.CTR);
+
+            LOG_INFO("[ENC2 DIAG] DMA-rem=%u offset=%u rdIdx=%u"
+                     " CC0=%u CTR=%u"
+                     " IIDX=0x%02lX RIS=0x%04lX"
+                     " %s\r\n",
+                dmaRem, offset, s_readIndex,
+                timg7CC0, timg7CTR,
+                timg7IIDX, timg7RIS,
+                (writeOffset != s_lastWriteOffset) ? "DATA!" : "no-data");
+
+            s_lastWriteOffset = writeOffset;
+        }
+
         return;
     }
 
@@ -189,22 +257,24 @@ void PORT_MOTOR_ENCODER2_Poll(int32_t *deltaPulses)
          * A 相电平 (bit28): 理论值为 1 (上升沿), 但为健壮性做验证
          * B 相电平 (bit29): 0=LOW → 正转, 1=HIGH → 反转
          */
-        if (snapshot & ENC2_BIT_A)
-        {
-            /* A 相为高, 确认这是一个有效的上升沿快照 */
-            if (snapshot & ENC2_BIT_B)
-            {
-                pulseCount--;   /* B=HIGH → 反转 */
-            }
-            else
-            {
-                pulseCount++;   /* B=LOW  → 正转 */
-            }
-        }
         /*
-         * 理论上不应出现 A=0 的情况 (DMA 只在上升沿触发),
-         * 但若出现 (如噪声或 DMA 时序边界), 忽略该条目。
+         * DMA 仅在 A 相上升沿被触发, 因此每条快照 = 1 个有效脉冲。
+         * PA28 (A相) 作为 TIMG7 CCP0 外设功能, GPIOA->DIN31_0 中
+         * 对应位可能不反映真实电平, 故不检查 bit28。
+         *
+         * 方向判定: bit29 (PA29 = B 相) 在 A 相上升沿时刻被 DMA
+         * 同步锁存, 可直接用来判断方向。
+         *   B=0 (LOW)  → 正转 +1
+         *   B=1 (HIGH) → 反转 -1
          */
+        if (snapshot & ENC2_BIT_B)
+        {
+            pulseCount--;   /* B=HIGH → 反转 */
+        }
+        else
+        {
+            pulseCount++;   /* B=LOW  → 正转 */
+        }
 
         /* 环形缓冲区索引递增 */
         idx++;
@@ -218,25 +288,11 @@ void PORT_MOTOR_ENCODER2_Poll(int32_t *deltaPulses)
     s_readIndex = writeOffset;
 
     /*
-     * 重置 DMA 目的地址到缓冲区头部
+     * DMA 循环模式: 硬件自动回绕到 g_enc2Buffer[0], 无需 CPU 干预。
      *
-     * NORMAL 模式下 DMA 写满 ENC2_BUF_SIZE 条后停止。
-     * 此处每次 Poll 后都将 DMA 目的地址重置为缓冲区基址,
-     * 实现软件控制的环形回绕。
-     *
-     * 代价: 单次 DMA 调用开销 < 1 µs, 每 10ms 一次, 可忽略。
-     *
-     * 如果 DMA 的 destAddr 仍在缓冲区范围内 (未溢出), 不重置。
-     * 仅在接近缓冲区末尾时重置, 避免干扰当前 DMA 传输。
+     * 如果没有启用循环模式 (SysConfig DMA extendedMode = Circular),
+     * 则 NORMAL 模式下 DMA 传完 256 次后停止。需在 SysConfig 中修改。
      */
-    if (writeOffset >= (ENC2_BUF_SIZE - 16U))
-    {
-        DL_DMA_setDestAddr(DMA, DMA_CH0_CHAN_ID,
-            (uint32_t)&g_enc2Buffer[0]);
-        DL_DMA_setTransferSize(DMA, DMA_CH0_CHAN_ID, ENC2_BUF_SIZE);
-        DL_DMA_enableChannel(DMA, DMA_CH0_CHAN_ID);
-        s_readIndex = 0;
-    }
 
     *deltaPulses = pulseCount;
 }

@@ -69,10 +69,15 @@ CAPTURE1.ccp0PinConfig.internalResistor     = "PULL_UP";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 
+DMA.subscriberIndex                             = ["1"];
+DMA.sub1ChanID                                  = 1;
 DMA.associatedChannels.create(1);
-DMA.associatedChannels[0].$name         = "DMA_CH0";
-DMA.associatedChannels[0].triggerSelect = "FSUB_1";
-DMA.associatedChannels[0].addressMode   = "f2b";
+DMA.associatedChannels[0].$name                 = "DMA_CH0";
+DMA.associatedChannels[0].triggerSelect         = "FSUB_1";
+DMA.associatedChannels[0].addressMode           = "f2b";
+DMA.associatedChannels[0].transferMode          = "FULL_CH_REPEAT_SINGLE";
+DMA.associatedChannels[0].configureTransferSize = true;
+DMA.associatedChannels[0].transferSize          = 256;
 
 GPIO1.$name                         = "LED";
 GPIO1.port                          = "PORTB";

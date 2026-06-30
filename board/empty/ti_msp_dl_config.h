@@ -211,6 +211,9 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 /* Defines for encoderb: GPIOA.25 with pinCMx 55 on package pin 26 */
 #define ENCODER_encoderb_PIN                                    (DL_GPIO_PIN_25)
 #define ENCODER_encoderb_IOMUX                                   (IOMUX_PINCM55)
+/* Defines for M_encoder: GPIOA.29 with pinCMx 4 on package pin 36 */
+#define ENCODER_M_encoder_PIN                                   (DL_GPIO_PIN_29)
+#define ENCODER_M_encoder_IOMUX                                   (IOMUX_PINCM4)
 /* Port definition for Pin Group ICM */
 #define ICM_PORT                                                         (GPIOB)
 
@@ -265,9 +268,6 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define TB6612_BIN2_PORT                                                 (GPIOA)
 #define TB6612_BIN2_PIN                                         (DL_GPIO_PIN_23)
 #define TB6612_BIN2_IOMUX                                        (IOMUX_PINCM53)
-/* Defines for M_encoder: GPIOA.29 with pinCMx 4 on package pin 36 */
-#define ENCODER_M_encoder_PIN                                   (DL_GPIO_PIN_29)
-#define ENCODER_M_encoder_IOMUX                                   (IOMUX_PINCM4)
 
 
 

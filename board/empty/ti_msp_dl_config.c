@@ -548,6 +548,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_DMA_CH0_init(void)
     DL_DMA_initChannel(DMA, DMA_CH0_CHAN_ID , (DL_DMA_Config *) &gDMA_CH0Config);
 }
 SYSCONFIG_WEAK void SYSCFG_DL_DMA_init(void){
+    DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_1, 1);
     SYSCFG_DL_DMA_CH0_init();
 }
 

@@ -45,8 +45,8 @@ void tb6612_task(void *pvParameters)
 
     /* Init hardware: coast + duty 0 */
     motor->init(motor);
-    LOG_INFO("[TB6612] Initialized (pins: PA12/PWMA, PA13/PWMB, "
-             "PA22/AIN1, PB21/AIN2, PB23/BIN1, PA23/BIN2)\r\n");
+    /* LOG_INFO("[TB6612] Initialized (pins: PA12/PWMA, PA13/PWMB, "
+             "PA22/AIN1, PB21/AIN2, PB23/BIN1, PA23/BIN2)\r\n"); */
 
     static bool     s_on       = false;
     static uint8_t  s_leftSpd  = 0;
@@ -67,13 +67,13 @@ void tb6612_task(void *pvParameters)
                     motor->enable(motor);
                     PORT_TB6612_SetLeftDuty(s_leftSpd);
                     PORT_TB6612_SetRightDuty(s_rightSpd);
-                    LOG_INFO("[TB6612] Motor ON, speed=%d%%, dir=%s\r\n",
+                    /* LOG_INFO("[TB6612] Motor ON, speed=%d%%, dir=%s\r\n",
                              motor->getSpeed(motor),
-                             s_dirNames[motor->getDirection(motor)]);
+                             s_dirNames[motor->getDirection(motor)]); */
                 } else {
                     s_on = false;
                     motor->disable(motor);
-                    LOG_INFO("[TB6612] Motor OFF\r\n");
+                    /* LOG_INFO("[TB6612] Motor OFF\r\n"); */
                 }
                 break;
 
@@ -82,7 +82,7 @@ void tb6612_task(void *pvParameters)
                 if (cmd.val > 100) cmd.val = 100;
                 motor->setSpeed(motor, (uint8_t)cmd.val);
                 if (s_on) {
-                    LOG_INFO("[TB6612] Speed=%d%%\r\n", (int)cmd.val);
+                    /* LOG_INFO("[TB6612] Speed=%d%%\r\n", (int)cmd.val); */
                 }
                 break;
 
@@ -90,20 +90,20 @@ void tb6612_task(void *pvParameters)
                 if (cmd.val >= 0 && cmd.val < (int16_t)DIR_COUNT) {
                     motor->setDirection(motor, (TB6612_Dir)cmd.val);
                     if (s_on) {
-                        LOG_INFO("[TB6612] Direction=%s\r\n",
-                                 s_dirNames[motor->getDirection(motor)]);
+                        /* LOG_INFO("[TB6612] Direction=%s\r\n",
+                                 s_dirNames[motor->getDirection(motor)]); */
                     }
                 }
                 break;
 
             case MOTOR_CMD_LEFT_ONLY:
                 PORT_TB6612_LeftOnly();
-                LOG_INFO("[TB6612] Left wheel only\r\n");
+                /* LOG_INFO("[TB6612] Left wheel only\r\n"); */
                 break;
 
             case MOTOR_CMD_RIGHT_ONLY:
                 PORT_TB6612_RightOnly();
-                LOG_INFO("[TB6612] Right wheel only\r\n");
+                /* LOG_INFO("[TB6612] Right wheel only\r\n"); */
                 break;
 
             case MOTOR_CMD_LEFT_SPEED:
@@ -113,7 +113,7 @@ void tb6612_task(void *pvParameters)
                 if (s_on) {
                     PORT_TB6612_SetLeftDuty(s_leftSpd);
                 }
-                LOG_INFO("[TB6612] Left speed=%d%%\r\n", (int)cmd.val);
+                /* LOG_INFO("[TB6612] Left speed=%d%%\r\n", (int)cmd.val); */
                 break;
 
             case MOTOR_CMD_RIGHT_SPEED:
@@ -123,7 +123,7 @@ void tb6612_task(void *pvParameters)
                 if (s_on) {
                     PORT_TB6612_SetRightDuty(s_rightSpd);
                 }
-                LOG_INFO("[TB6612] Right speed=%d%%\r\n", (int)cmd.val);
+                /* LOG_INFO("[TB6612] Right speed=%d%%\r\n", (int)cmd.val); */
                 break;
 
             default:

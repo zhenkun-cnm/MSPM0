@@ -1,31 +1,53 @@
-# Motor 2 编码器 TIMG7 输入捕获修复计划
+# ICM-20608 采集程序实现计划
 
-## 问题
-TIMG7 RIS 从 0x0023 变成 0x0033 后不再更新 → 后续边沿未被捕获。
-DMA 也未被触发（DMA-rem=256 始终不变）。
+## 目标
+将现有 ICM-20948 软件 SPI 驱动替换为 ICM-20608 硬件 SPI1 驱动（与 W25Q64 共享总线）
 
-## 根因假设（按优先级）
-1. **TIMG7 捕获模式未正确启动** — `DL_TimerG_startCounter()` 对 Capture 模式可能不够，需要用 `DL_TimerG_startTimer()` 或清除捕获锁存
-2. **CC0 锁存后需要软件读走才能再次捕获** — Edge-Time 模式下每次捕获后需读 CC0 寄存器或清除标志
-3. **LOAD_VALUE=63999 导致计数器在捕获前溢出** — 周期太短，CNT 频繁回绕干扰捕获
+## 关键决策
+| 项目 | 决策 |
+|------|------|
+| SPI 驱动方式 | 硬件 SPI1 (与 W25Q64 共享) |
+| IMU CS 引脚 | PA14 (IOMUX_PINCM36) |
+| 传感器类型 | 6 轴 (陀螺+加计)，无磁力计 |
+| 旧 ICM-20948 代码 | 全部删除，完全重写 |
+| SPI 速率 | 与 W25Q64 现有配置兼容 |
+| 寄存器映射 | 标准 MPU-6xxx 兼容（ICM-20608 手册不含完整表） |
 
 ## 阶段
 
-### 阶段 1: 验证 CC0 寄存器 🔄
-- ✅ 在诊断日志中加入 CC0 读数 (DL_TimerG_getCaptureCompareValue)
-- ✅ 同时打印 CTR 进行对比
-- 🔄 等待用户烧录验证
-- 若 CC0 不变 → 捕获根本没工作，问题在定时器配置
-- 若 CC0 随边沿更新 → 捕获正常，问题在 Event Fabric 订阅
+### 阶段 1: 解析 ICM-20608 数据手册 ✅
+- ✅ 读取 PDF 全 35 页
+- ✅ 提取 SPI 接口协议 (p.28)、时序 (p.15)、寄存器地址、初始化流程
+- ✅ 写入 `ICM20608.datasheet.md` 缓存
 
-### 阶段 2: 修复捕获配置
-- 若 CC0 不更新：
-  - 尝试用 `DL_TimerG_clearInterruptStatus()` 或读 CC0 解锁捕获锁存
-  - 换用 `DL_TimerG_startTimer()` 替代 `startCounter()`
-  - 增大 LOAD_VALUE 为 65535 减少溢出干扰
-- 若 CC0 更新但 DMA 不触发：
-  - 在 MSPM0 设备头文件中找到 GEN_EVENT 外设基址
-  - 写 `SUBSCRIBE_CFG[1] = 1` 建立事件路由
+### 阶段 2: 重写 port_imu.h ✅
+- ✅ 删除 ICM-20948 专属声明（Bank 切换、软件 SPI 宏）
+- ✅ 新增硬件 SPI 函数声明
+- ✅ CS 引脚 PA14 定义
+- ✅ 保留 DevIMU 接口兼容
 
-### 阶段 3: 验证完整链路
-- 旋转编码器 → CC0 变化 → DMA-rem 递减 → g_motor2PulseCount 非零
+### 阶段 3: 重写 port_imu.c ✅
+- ✅ CS GPIO 控制 (PA14)
+- ✅ SPI 单字节收发（复用 W25Q64_INST = SPI1）
+- ✅ 寄存器读写（手册 §6.5: R/W + 7bit addr）
+- ✅ 突发读（支持连续读取多字节）
+- ✅ 初始化序列:
+  - 上电等待 100ms (p.11)
+  - 软复位 PWR_MGMT_1 bit7 (p.24)
+  - 退出睡眠 CLKSEL=1 (p.22)
+  - 禁用 I2C (I2C_IF_DIS) (p.25)
+  - 配置量程 ±2g / ±250°/s (p.7-8)
+- ✅ WHO_AM_I 校验 (0xAE)
+- ✅ 传感器数据读取（14 字节突发读，6 轴解析）
+
+### 阶段 4: 验证编译 🔄
+- 🔄 确认编译通过（需用户执行 Keil build）
+
+### 阶段 5: 更新 Keil 工程
+- 确认 port_imu.c 在编译列表中
+- 确认 `#include "dev_imu.h"` 路径正确
+
+## 遇到的错误
+| 错误 | 尝试次数 | 解决方案 |
+|------|---------|---------|
+| 无 | 0 | - |

@@ -151,20 +151,20 @@ void PORT_MOTOR_ENCODER2_Init(void)
     uint16_t cnt2 = (uint16_t)(TIMG7->COUNTERREGS.CTR);
     uint16_t cntDiff = cnt2 - cnt1;
 
-    LOG_INFO("[ENC2] CNT1=%u CNT2=%u diff=%u %s\r\n",
+    /* LOG_INFO("[ENC2] CNT1=%u CNT2=%u diff=%u %s\r\n",
         cnt1, cnt2, cntDiff,
-        (cntDiff > 0) ? "RUNNING" : "STOPPED");
+        (cntDiff > 0) ? "RUNNING" : "STOPPED"); */
 
     /*
      * 诊断: 打印 DMA 传输大小初始值
      */
     uint16_t dmaRem = DL_DMA_getTransferSize(DMA, DMA_CH0_CHAN_ID);
-    LOG_INFO("[ENC2] DMA remaining=%u src=0x%08lX dest=0x%08lX\r\n",
+    /* LOG_INFO("[ENC2] DMA remaining=%u src=0x%08lX dest=0x%08lX\r\n",
         dmaRem,
         (uint32_t)&GPIOA->DIN31_0,
         (uint32_t)&g_enc2Buffer[0]);
 
-    LOG_INFO("[ENC2] DMA-GPIO snapshot encoder initialized\r\n");
+    LOG_INFO("[ENC2] DMA-GPIO snapshot encoder initialized\r\n"); */
 }
 
 /* ================================================================
@@ -216,14 +216,14 @@ void PORT_MOTOR_ENCODER2_Poll(int32_t *deltaPulses)
                                      TB6612_ENB_INST, DL_TIMER_CC_0_INDEX);
             uint16_t timg7CTR  = (uint16_t)(TIMG7->COUNTERREGS.CTR);
 
-            LOG_INFO("[ENC2 DIAG] DMA-rem=%u offset=%u rdIdx=%u"
+            /* LOG_INFO("[ENC2 DIAG] DMA-rem=%u offset=%u rdIdx=%u"
                      " CC0=%u CTR=%u"
                      " IIDX=0x%02lX RIS=0x%04lX"
                      " %s\r\n",
                 dmaRem, offset, s_readIndex,
                 timg7CC0, timg7CTR,
                 timg7IIDX, timg7RIS,
-                (writeOffset != s_lastWriteOffset) ? "DATA!" : "no-data");
+                (writeOffset != s_lastWriteOffset) ? "DATA!" : "no-data"); */
 
             s_lastWriteOffset = writeOffset;
         }

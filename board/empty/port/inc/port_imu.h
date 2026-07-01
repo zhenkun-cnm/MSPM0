@@ -23,11 +23,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* SPI1 互斥锁（与 W25Q64 Flash 共享总线），在 port_imu.c 中定义 */
-#include "FreeRTOS.h"
-#include "semphr.h"
-extern SemaphoreHandle_t g_spi1_mutex;
-
 /**
  * @brief 初始化 ICM-20608 引脚（SPI1 复用 + CS GPIO）
  * @note  SPI1 硬件外设由 SysConfig 生成的 W25Q64_init() 初始化，

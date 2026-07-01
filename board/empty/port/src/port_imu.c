@@ -20,22 +20,6 @@
 #include "ti_msp_dl_config.h"
 #include <ti/devices/msp/msp.h>
 #include <ti/driverlib/driverlib.h>
-#include "FreeRTOS.h"
-#include "semphr.h"
-
-/* SPI1 全局互斥锁 — IMU 和 Flash 共享总线时保护 */
-SemaphoreHandle_t g_spi1_mutex = NULL;
-
-/* 获取 SPI1 总线（最多等 100ms） */
-static inline bool spi1_lock(void)
-{
-    if (g_spi1_mutex == NULL) return true; /* Not created yet, single-threaded */
-    return (xSemaphoreTake(g_spi1_mutex, pdMS_TO_TICKS(100)) == pdTRUE);
-}
-static inline void spi1_unlock(void)
-{
-    if (g_spi1_mutex != NULL) xSemaphoreGive(g_spi1_mutex);
-}
 
 /* ================================================================
  *  CS 引脚定义 — PB6 (IOMUX_PINCM23)

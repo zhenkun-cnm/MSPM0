@@ -7,14 +7,9 @@
  */
 
 #include "port_flash.h"
-#include "port_imu.h"       /* g_spi1_mutex */
 #include "ti_msp_dl_config.h"
 #include <ti/devices/msp/msp.h>
 #include <ti/driverlib/driverlib.h>
-
-/* Flash 操作宏：自动加锁/解锁 SPI1 */
-#define SPI1_LOCK()   do { if (g_spi1_mutex) xSemaphoreTake(g_spi1_mutex, pdMS_TO_TICKS(500)); } while(0)
-#define SPI1_UNLOCK() do { if (g_spi1_mutex) xSemaphoreGive(g_spi1_mutex); } while(0)
 
 /* W25Q 指令集 */
 #define CMD_WRITE_ENABLE    0x06    /* 写使能 */
@@ -81,11 +76,9 @@ uint8_t PORT_FLASH_SPI_TransferByte(uint8_t tx)
 /* 写使能 */
 static void cmd_write_enable(void)
 {
-    SPI1_LOCK();
     PORT_FLASH_CS_Low();
     PORT_FLASH_SPI_TransferByte(CMD_WRITE_ENABLE);
     PORT_FLASH_CS_High();
-    SPI1_UNLOCK();
 }
 
 /* 等待 BUSY 完成 */
@@ -93,7 +86,6 @@ static void cmd_wait_busy(void)
 {
     uint32_t timeout;
 
-    SPI1_LOCK();
     PORT_FLASH_CS_Low();
     PORT_FLASH_SPI_TransferByte(CMD_READ_STATUS1);
 
@@ -103,7 +95,6 @@ static void cmd_wait_busy(void)
     }
 
     PORT_FLASH_CS_High();
-    SPI1_UNLOCK();
 }
 
 /* 发送 24-bit 地址（MSB first） */

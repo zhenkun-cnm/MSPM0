@@ -11,6 +11,7 @@
                 "c:\\ti\\mspm0_project\\APP\\inc",
                 "c:\\ti\\mspm0_project\\Device\\inc",
                 "c:\\ti\\mspm0_project\\board\\empty\\port\\inc",
+                "c:\\ti\\mspm0_project\\Algorithm\\inc",
                 "D:\\Keil\\V5.4\\ARM\\ARMCLANG\\include",
                 "D:\\Keil\\V5.4\\ARM\\ARMCLANG\\include\\arm_linux",
                 "D:\\Keil\\V5.4\\ARM\\ARMCLANG\\include\\arm_linux_compat",
@@ -21,7 +22,8 @@
                 "c:\\ti\\mspm0_project\\Middleware\\FreeRTOS\\portable\\MemMang",
                 "c:\\ti\\mspm0_project\\APP\\src",
                 "c:\\ti\\mspm0_project\\Device\\src",
-                "c:\\ti\\mspm0_project\\board\\empty\\port\\src"
+                "c:\\ti\\mspm0_project\\board\\empty\\port\\src",
+                "c:\\ti\\mspm0_project\\Algorithm\\src"
             ],
             "defines": [
                 "__MSPM0G3507__",

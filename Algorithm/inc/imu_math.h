@@ -9,7 +9,12 @@
 #define IMU_MATH_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 /* ================================================================
  *  四元数运算

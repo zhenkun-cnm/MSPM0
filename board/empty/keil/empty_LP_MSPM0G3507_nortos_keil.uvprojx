@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>__MSPM0G3507__</Define>
               <Undefine></Undefine>
-              <IncludePath>../;..\..\..\..\mspm0_sdk_2_10_00_04\source\third_party\CMSIS\Core\Include;..\..\..\..\mspm0_sdk_2_10_00_04\source;..\..\..\Middleware\FreeRTOS\include;..\..\..\Middleware\FreeRTOS\portable\GCC\ARM_CM0;..\..\..\APP\inc;..\..\..\Device\inc;..\port\inc</IncludePath>
+              <IncludePath>../;..\..\..\..\mspm0_sdk_2_10_00_04\source\third_party\CMSIS\Core\Include;..\..\..\..\mspm0_sdk_2_10_00_04\source;..\..\..\Middleware\FreeRTOS\include;..\..\..\Middleware\FreeRTOS\portable\GCC\ARM_CM0;..\..\..\APP\inc;..\..\..\Device\inc;..\port\inc;..\..\..\Algorithm\inc</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -584,10 +584,37 @@
               <FileType>1</FileType>
               <FilePath>..\port\src\port_motor_encoder2.c</FilePath>
             </File>
+            <File>
+              <FileName>port_hardfault.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_hardfault.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
-          <GroupName>BSP_Src</GroupName>
+          <GroupName>Algorithm/Src</GroupName>
+          <Files>
+            <File>
+              <FileName>imu_ekf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_ekf.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu_math.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_math.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu_madgwick.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_madgwick.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu_ekf_light.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_ekf_light.c</FilePath>
+            </File>
+          </Files>
         </Group>
       </Groups>
     </Target>
@@ -598,5 +625,14 @@
     <components/>
     <files/>
   </RTE>
+
+  <LayerInfo>
+    <Layers>
+      <Layer>
+        <LayName>empty_LP_MSPM0G3507_nortos_keil</LayName>
+        <LayPrjMark>1</LayPrjMark>
+      </Layer>
+    </Layers>
+  </LayerInfo>
 
 </Project>

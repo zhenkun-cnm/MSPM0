@@ -20,6 +20,8 @@ const GPIO4    = GPIO.addInstance();
 const GPIO5    = GPIO.addInstance();
 const GPIO6    = GPIO.addInstance();
 const GPIO7    = GPIO.addInstance();
+const I2C      = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C1     = I2C.addInstance();
 const NONMAIN  = scripting.addModule("/ti/driverlib/NONMAIN");
 const PWM      = scripting.addModule("/ti/driverlib/PWM", {}, false);
 const PWM1     = PWM.addInstance();
@@ -157,6 +159,15 @@ GPIO7.associatedPins[2].$name       = "BIN1";
 GPIO7.associatedPins[2].pin.$assign = "PB23";
 GPIO7.associatedPins[3].$name       = "BIN2";
 GPIO7.associatedPins[3].pin.$assign = "PA23";
+
+I2C1.$name                           = "I2C_0";
+I2C1.basicEnableController           = true;
+I2C1.basicControllerStandardBusSpeed = "Fast";
+I2C1.peripheral.$assign              = "I2C0";
+I2C1.peripheral.sdaPin.$assign       = "PA0";
+I2C1.peripheral.sclPin.$assign       = "PA1";
+I2C1.sdaPinConfig.$name              = "ti_driverlib_gpio_GPIOPinGeneric10";
+I2C1.sclPinConfig.$name              = "ti_driverlib_gpio_GPIOPinGeneric11";
 
 NONMAIN.nonmainWarning    = true;
 NONMAIN.bslInvokePinCheck = false;

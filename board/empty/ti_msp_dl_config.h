@@ -142,6 +142,22 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 
 
 
+
+/* Defines for I2C_0 */
+#define I2C_0_INST                                                          I2C0
+#define I2C_0_INST_IRQHandler                                    I2C0_IRQHandler
+#define I2C_0_INST_INT_IRQN                                        I2C0_INT_IRQn
+#define I2C_0_BUS_SPEED_HZ                                                400000
+#define GPIO_I2C_0_SDA_PORT                                                GPIOA
+#define GPIO_I2C_0_SDA_PIN                                         DL_GPIO_PIN_0
+#define GPIO_I2C_0_IOMUX_SDA                                      (IOMUX_PINCM1)
+#define GPIO_I2C_0_IOMUX_SDA_FUNC                       IOMUX_PINCM1_PF_I2C0_SDA
+#define GPIO_I2C_0_SCL_PORT                                                GPIOA
+#define GPIO_I2C_0_SCL_PIN                                         DL_GPIO_PIN_1
+#define GPIO_I2C_0_IOMUX_SCL                                      (IOMUX_PINCM2)
+#define GPIO_I2C_0_IOMUX_SCL_FUNC                       IOMUX_PINCM2_PF_I2C0_SCL
+
+
 /* Defines for sys_uart */
 #define sys_uart_INST                                                      UART0
 #define sys_uart_INST_FREQUENCY                                         40000000
@@ -283,6 +299,7 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 void SYSCFG_DL_DC_MOTOR_init(void);
 void SYSCFG_DL_TB6612_ENA_init(void);
 void SYSCFG_DL_TB6612_ENB_init(void);
+void SYSCFG_DL_I2C_0_init(void);
 void SYSCFG_DL_sys_uart_init(void);
 void SYSCFG_DL_W25Q64_init(void);
 void SYSCFG_DL_DMA_init(void);

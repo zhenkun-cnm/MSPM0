@@ -589,6 +589,11 @@
               <FileType>1</FileType>
               <FilePath>..\port\src\port_hardfault.c</FilePath>
             </File>
+            <File>
+              <FileName>port_lis3mdl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_lis3mdl.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -623,6 +628,11 @@
               <FileName>imu_complementary.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\Algorithm\src\imu_complementary.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu_ahrs9.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_ahrs9.c</FilePath>
             </File>
           </Files>
         </Group>

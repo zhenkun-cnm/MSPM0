@@ -285,11 +285,9 @@ static void imu_init(DevIMU *self)
     PORT_IMU_WriteReg(REG_ACCEL_CONFIG, ACCEL_FS_2G);
     LOG_INFO("[IMU] ACCEL_CONFIG: +/-2g\r\n");
 
-    /* 8. 配置陀螺仪量程 ±2000°/s（手册 Table 1 p.7）
-     *    灵敏度: 65536 / 4000 = 16.4 LSB/(°/s)
-     */
-    PORT_IMU_WriteReg(REG_GYRO_CONFIG, GYRO_FS_2000DPS);
-    LOG_INFO("[IMU] GYRO_CONFIG: +/-2000dps\r\n");
+    /* 8. 配置陀螺仪量程 ±250°/s（手册 Table 1 p.7） */
+    PORT_IMU_WriteReg(REG_GYRO_CONFIG, GYRO_FS_250DPS);
+    LOG_INFO("[IMU] GYRO_CONFIG: +/-250dps\r\n");
 
     /* 9. 配置采样率分频 & DLPF */
     PORT_IMU_WriteReg(REG_SMPLRT_DIV, 0x00);

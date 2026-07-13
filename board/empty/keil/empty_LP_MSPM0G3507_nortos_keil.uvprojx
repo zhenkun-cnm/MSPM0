@@ -614,6 +614,16 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\Algorithm\src\imu_ekf_light.c</FilePath>
             </File>
+            <File>
+              <FileName>imu_filter.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_filter.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu_complementary.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Algorithm\src\imu_complementary.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>

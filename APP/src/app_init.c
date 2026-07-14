@@ -23,6 +23,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+
+#define APP_IMU_ONLY_DIAG 1
  
 /* 编码器→菜单事件队列定义（声明见 app_menu.h） */
 QueueHandle_t g_menuEvtQueue = NULL;
@@ -89,6 +91,16 @@ static void start_task(void *pvParameters)
     if (g_imuDataQueue == NULL) {
         LOG_ERROR("[INIT] IMU data queue create failed!\r\n");
     }
+
+#if APP_IMU_ONLY_DIAG
+    app_imu_start();
+    LOG_INFO("  IMU-only diag mode; other tasks disabled\r\n");
+    LOG_INFO("====================================\r\n");
+
+    taskEXIT_CRITICAL();
+    vTaskDelete(NULL);
+    return;
+#endif
 
     g_motorOdomQueue = xQueueCreate(MOTOR_ODOM_QUEUE_LEN, sizeof(MotorOdomDelta_t));
     if (g_motorOdomQueue == NULL) {

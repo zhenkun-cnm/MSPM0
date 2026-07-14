@@ -37,6 +37,10 @@
 #define ICM_I2C_ADDR_ALT        0x69
 #define ICM_PROBE_RETRY_COUNT   8
 #define ICM_PROBE_RETRY_DELAY_MS 150
+#define ICM_RESET_DELAY_MS      500
+#define ICM_WAKE_DELAY_MS       100
+#define ICM_WHOAMI_RETRY_COUNT  5
+#define ICM_WHOAMI_RETRY_DELAY_MS 50
 
 static bool g_imu_init_ok = false;
 static bool g_i2c_diag_done = false;
@@ -93,6 +97,31 @@ static bool i2c_wait_done_ex(const char *phase, uint8_t addr, bool quiet)
 static bool i2c_wait_done(const char *phase, uint8_t addr)
 {
     return i2c_wait_done_ex(phase, addr, false);
+}
+
+static bool i2c_wait_rx_count(uint16_t needed, const char *phase)
+{
+    uint32_t status;
+    volatile uint32_t timeout = I2C_WAIT_CYCLES;
+
+    do {
+        if (DL_I2C_getControllerRXFIFOCounter(I2C_0_INST) >= needed) {
+            return true;
+        }
+
+        status = DL_I2C_getControllerStatus(I2C_0_INST);
+        if (status & I2C_ERROR_MASK) {
+            i2c_log_status(phase, g_icm_i2c_addr, status);
+            return false;
+        }
+    } while (--timeout);
+
+    LOG_RAW("[ICM-20608] %s RX_EMPTY count=%lu need=%u status=0x%08lX\r\n",
+            phase,
+            (unsigned long)DL_I2C_getControllerRXFIFOCounter(I2C_0_INST),
+            needed,
+            (unsigned long)DL_I2C_getControllerStatus(I2C_0_INST));
+    return false;
 }
 
 static bool i2c_probe_addr(uint8_t addr)
@@ -197,11 +226,7 @@ static bool i2c_read_reg(uint8_t reg, uint8_t *value)
                                    DL_I2C_CONTROLLER_DIRECTION_RX, 1);
     if (!i2c_wait_done("READ", g_icm_i2c_addr)) return false;
 
-    if (DL_I2C_getControllerRXFIFOCounter(I2C_0_INST) < 1U) {
-        LOG_RAW("[ICM-20608] READ RX_EMPTY status=0x%08lX\r\n",
-                (unsigned long)DL_I2C_getControllerStatus(I2C_0_INST));
-        return false;
-    }
+    if (!i2c_wait_rx_count(1, "READ")) return false;
     *value = DL_I2C_receiveControllerData(I2C_0_INST);
     return true;
 }
@@ -227,12 +252,7 @@ static bool i2c_read_regs(uint8_t reg, uint8_t *buf, uint16_t len)
                                    DL_I2C_CONTROLLER_DIRECTION_RX, len);
     if (!i2c_wait_done("READS", g_icm_i2c_addr)) return false;
 
-    if (DL_I2C_getControllerRXFIFOCounter(I2C_0_INST) < len) {
-        LOG_RAW("[ICM-20608] READS RX_EMPTY count=%lu need=%u status=0x%08lX\r\n",
-                (unsigned long)DL_I2C_getControllerRXFIFOCounter(I2C_0_INST),
-                len, (unsigned long)DL_I2C_getControllerStatus(I2C_0_INST));
-        return false;
-    }
+    if (!i2c_wait_rx_count(len, "READS")) return false;
     for (i = 0; i < len; i++)
         buf[i] = DL_I2C_receiveControllerData(I2C_0_INST);
     return true;
@@ -241,39 +261,63 @@ static bool i2c_read_regs(uint8_t reg, uint8_t *buf, uint16_t len)
 void PORT_IMU_Init(void)
 {
     uint8_t whoami;
-    LOG_RAW("[ICM-20608] Init start (auto I2C addr)\n");
+    bool whoamiRead = false;
+
+    LOG_RAW("[ICM-20608] Init start (auto I2C addr)\r\n");
     i2c_bus_diag_once();
     if (!icm_select_i2c_addr()) {
         g_imu_init_ok = false;
         return;
     }
     delay_ms(100);
-    LOG_RAW("[ICM-20608] Device reset...\n");
+    LOG_RAW("[ICM-20608] Device reset...\r\n");
     if (!i2c_write_reg(REG_PWR_MGMT_1, PWR_MGMT_1_DEVICE_RESET)) {
         g_imu_init_ok = false;
-        LOG_RAW("[ICM-20608] FAIL: reset write failed!\n");
+        LOG_RAW("[ICM-20608] FAIL: reset write failed!\r\n");
         return;
     }
-    delay_ms(100);
+    delay_ms(ICM_RESET_DELAY_MS);
+    i2c_prepare_transfer();
+
+    if (!icm_select_i2c_addr()) {
+        g_imu_init_ok = false;
+        LOG_RAW("[ICM-20608] FAIL: no ICM ACK after reset!\r\n");
+        return;
+    }
+
     if (!i2c_write_reg(REG_PWR_MGMT_1, PWR_MGMT_1_CLKSEL_AUTO)) {
         g_imu_init_ok = false;
-        LOG_RAW("[ICM-20608] FAIL: wake write failed!\n");
+        LOG_RAW("[ICM-20608] FAIL: wake write failed!\r\n");
         return;
     }
-    delay_ms(10);
-    if (!i2c_read_reg(REG_WHO_AM_I, &whoami)) {
+    delay_ms(ICM_WAKE_DELAY_MS);
+    i2c_prepare_transfer();
+
+    for (uint8_t attempt = 1; attempt <= ICM_WHOAMI_RETRY_COUNT; attempt++) {
+        if (i2c_read_reg(REG_WHO_AM_I, &whoami)) {
+            whoamiRead = true;
+            break;
+        }
+
+        LOG_RAW("[ICM-20608] WHO_AM_I retry %u/%u\r\n",
+                attempt, ICM_WHOAMI_RETRY_COUNT);
+        delay_ms(ICM_WHOAMI_RETRY_DELAY_MS);
+        i2c_prepare_transfer();
+    }
+
+    if (!whoamiRead) {
         g_imu_init_ok = false;
-        LOG_RAW("[ICM-20608] FAIL: WHO_AM_I read failed!\n");
+        LOG_RAW("[ICM-20608] FAIL: WHO_AM_I read failed!\r\n");
         return;
     }
-    LOG_RAW("[ICM-20608] WHO_AM_I = 0x%02X (expected 0x%02X)\n",
+    LOG_RAW("[ICM-20608] WHO_AM_I = 0x%02X (expected 0x%02X)\r\n",
             whoami, ICM_WHO_AM_I_EXPECTED);
     if (whoami == ICM_WHO_AM_I_EXPECTED) {
         g_imu_init_ok = true;
-        LOG_RAW("[ICM-20608] I2C OK\n");
+        LOG_RAW("[ICM-20608] I2C OK\r\n");
     } else {
         g_imu_init_ok = false;
-        LOG_RAW("[ICM-20608] FAIL: WHO_AM_I mismatch!\n");
+        LOG_RAW("[ICM-20608] FAIL: WHO_AM_I mismatch!\r\n");
         return;
     }
     if (!i2c_write_reg(REG_ACCEL_CONFIG, ACCEL_FS_16G) ||
@@ -283,10 +327,10 @@ void PORT_IMU_Init(void)
         !i2c_write_reg(REG_CONFIG, 3) ||
         !i2c_write_reg(REG_PWR_MGMT_2, 0x00)) {
         g_imu_init_ok = false;
-        LOG_RAW("[ICM-20608] FAIL: config write failed!\n");
+        LOG_RAW("[ICM-20608] FAIL: config write failed!\r\n");
         return;
     }
-    LOG_RAW("[ICM-20608] Init completed (I2C)\n");
+    LOG_RAW("[ICM-20608] Init completed (I2C)\r\n");
 }
 
 bool PORT_IMU_IsOk(void) { return g_imu_init_ok; }

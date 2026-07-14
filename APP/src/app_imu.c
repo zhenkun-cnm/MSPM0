@@ -20,7 +20,7 @@ static char g_lastYawSrc = 'G';
 static bool g_imuTaskStarted = false;
 
 #define IMU_TASK_STACK_SIZE      768
-#define IMU_TASK_PRIORITY        (tskIDLE_PRIORITY + 1)
+#define IMU_TASK_PRIORITY        (tskIDLE_PRIORITY + 3)
 #define IMU_TASK_PERIOD_MS       10
 #define IMU_PRINT_PERIOD_MS      1000
 #define IMU_INIT_RETRY_COUNT     5

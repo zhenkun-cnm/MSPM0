@@ -13,6 +13,7 @@
 #include "app_tft.h"
 #include "app_menu.h"
 #include "app_tb6612.h"
+#include "app_imu.h"
 #include "dev_tft.h"
 #include "dev_menu.h"
 #include "dev_encoder.h"
@@ -21,6 +22,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include <math.h>
 
 /* ================================================================
  *  Menu content tables (static tree, add menus here only)
@@ -90,10 +92,13 @@ static const MenuItem testItems[] = {
     {"Encoder",     MENU_LEAF,    NULL,        0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Button",      MENU_LEAF,    NULL,        0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Motor",       MENU_SUBMENU, motorItems,  MOTOR_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"IMU Check",   MENU_LEAF,    NULL,        0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 
+#define TEST_ITEM_COUNT     (sizeof(testItems) / sizeof(testItems[0]))
+
 static const MenuItem rootItems[] = {
-    {"Test",       MENU_SUBMENU, testItems,    4, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Test",       MENU_SUBMENU, testItems,    TEST_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Settings",   MENU_SUBMENU, settingsItems, 4, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Sensors",    MENU_SUBMENU, sensorItems,   2, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"About",      MENU_SUBMENU, aboutItems,    3, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
@@ -102,12 +107,12 @@ static const MenuItem rootItems[] = {
 #define ROOT_ITEM_COUNT     (sizeof(rootItems) / sizeof(rootItems[0]))
 
 /* ================================================================
- *  Render parameters
+ *  Render parameters (1.8" 160x128: 8 rows total, 7 visible + 1 status)
  * ================================================================ */
 #define MENU_ROW_H          16U
-#define MENU_MAX_ROWS       (TFT_HEIGHT / MENU_ROW_H)        /* =5 */
+#define MENU_MAX_ROWS       (TFT_HEIGHT / MENU_ROW_H)        /* =8 */
 
-/* Visible rows: full screen minus 1 status line = 4 */
+/* Visible rows: full screen minus 1 status line = 7 */
 #define MENU_VISIBLE_ROWS   (MENU_MAX_ROWS - 1)
 
 #define KEY_STATUS_Y        (TFT_HEIGHT - MENU_ROW_H)
@@ -330,6 +335,45 @@ void tft_task(void *pvParameters)
                 if (Menu_Enter(&menuCtx)) {
                     const MenuItem *cur = Menu_Current(&menuCtx);
                     if (handle_quick_leaf(cur, &menuCtx)) {
+                        menu_render(tft, &menuCtx);
+                    } else if (cur == &testItems[4]) {
+                        /* IMU Check leaf: live attitude display */
+                        IMU_Data_t imu;
+                        DevEncoder_Event_t imuEvt;
+                        bool imuRunning = true;
+
+                        tft->fillScreen(tft, TFT_BLACK);
+                        tft->printString(tft, 0, 0, "IMU Check", TFT_YELLOW, TFT_BLACK);
+                        tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
+
+                        while (imuRunning) {
+                            if (xQueuePeek(g_imuDataQueue, &imu,
+                                    pdMS_TO_TICKS(150)) == pdTRUE) {
+                                /* Yaw source labels */
+                                const char *ySrcLabel;
+                                if (imu.yawSource == 'M')      ySrcLabel = "[Mag]";
+                                else if (imu.yawSource == 'B') ySrcLabel = "[Bias]";
+                                else                           ySrcLabel = "[Gyro]";
+
+                                tft->printf(tft, 0, 1*MENU_ROW_H, TFT_WHITE, TFT_BLACK,
+                                            "Roll:  %+7.2f", (double)imu.roll);
+                                tft->printf(tft, 0, 2*MENU_ROW_H, TFT_WHITE, TFT_BLACK,
+                                            "Pitch: %+7.2f", (double)imu.pitch);
+                                tft->printf(tft, 0, 3*MENU_ROW_H, TFT_WHITE, TFT_BLACK,
+                                            "Yaw:   %+07.1f %s", (double)imu.yaw, ySrcLabel);
+                            }
+
+                            /* Non-blocking poll for encoder events */
+                            while (xQueueReceive(g_menuEvtQueue, &imuEvt, 0) == pdTRUE) {
+                                if (imuEvt == ENCODER_EVT_KEY_LONG) {
+                                    g_lastKeyMsg = "Key:LONG";
+                                    imuRunning = false;
+                                }
+                            }
+                        }
+
+                        Menu_Back(&menuCtx);
+                        g_scrollOfs = 0;
                         menu_render(tft, &menuCtx);
                     } else {
                         inLeaf = true;

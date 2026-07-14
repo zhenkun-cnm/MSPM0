@@ -9,6 +9,31 @@
 #include <ti/devices/msp/msp.h>
 #include <ti/driverlib/driverlib.h>
 #include <stdarg.h>
+#include <stdio.h>
+
+#if defined(__ARMCC_VERSION)
+__asm(".global __use_no_semihosting\n");
+
+struct __FILE {
+    int handle;
+};
+
+FILE __stdout;
+
+int fputc(int ch, FILE *stream)
+{
+    (void)stream;
+    LOG_OutputChar((char)ch);
+    return ch;
+}
+
+void _sys_exit(int return_code)
+{
+    (void)return_code;
+    while (1) {
+    }
+}
+#endif
 
 /* ========== 底层 UART 输出 ========== */
 

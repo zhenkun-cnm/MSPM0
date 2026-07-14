@@ -24,3 +24,45 @@
 
 ### 剩余步骤
 - 用户需要重启 Cline VS Code 窗口，让 MCP Server 重新建立连接
+
+---
+
+## 2026-07-14 - Motor encoder calibration sync
+
+- Read desktop calibration text and matched it against `app_motor_encoder.c` and `port_motor_encoder2.c/h`.
+- Recorded M2 reason: raw TIMG7/DMA path is 1x A-rising capture; App-layer software scale makes measured output about 984/985 counts per rev.
+- Updated root planning files and source comments/constants; removed stray calibration numbers from `board/empty/empty.c`.
+- Keil rebuild passed: `0 Error(s), 1 Warning(s)`; warning is the existing `LED_PORT` macro redefinition.
+
+---
+
+## 2026-07-14 - INS v1 code integration
+
+- Created `INS_DOCS/INS_PROGRESS.md`, `INS_DOCS/INS_QA.md`, `INS_DOCS/INS_TECH_PLAN.md`, and `INS_DOCS/INS_PROGRESS_FOR_USER.txt`.
+- Added `app_ins` module for 10ms wheel odometry + IMU yaw pose estimation.
+- Added motor odometry queue frames: left/right counts plus tick.
+- Started IMU and INS tasks from `app_init.c`.
+- Changed IMU queue length to 1 because it uses latest-sample overwrite semantics.
+- Disabled destructive Flash test at `0x00000000`; INS log region starts at `0x00100000`.
+- Added `app_ins.c` to Keil App/Src.
+- Changed TFT IMU check to `xQueuePeek` so it does not consume yaw samples needed by INS.
+- Keil rebuild passed: `0 Error(s), 1 Warning(s)`.
+
+Pending:
+- On-car static, straight-line, yaw, rectangle, and Flash log tests.
+
+---
+
+## 2026-07-14 - INS standardized validation plan
+
+- User reported initial hand-push results: about 5cm error on approximate 100cm straight line; about 2-8cm X and 0.5-2cm Y error after approximate 60cm square return; yaw almost no error.
+- Decision: INS v1 is usable enough to continue, but standardized validation is required before entering navigation.
+- Marked the current stage as non-precision confirmation testing.
+- Current tests are not precision calibration and must not directly modify wheel diameter, wheelbase, or counts/rev.
+- Precision testing will start only after the user explicitly says "开始精准测试".
+- Added `INS_DOCS/INS_STANDARD_TEST_PLAN.md`.
+- Added `INS_DOCS/INS_TEST_RECORD.md`.
+- Updated INS progress and technical docs with pass/fail criteria.
+
+Pending:
+- Fill the record table after 1m/2m straight tests, 60cm square tests, and right-turn 90 degree tests.

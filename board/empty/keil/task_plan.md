@@ -51,3 +51,48 @@
 | 错误 | 尝试次数 | 解决方案 |
 |------|---------|---------|
 | 无 | 0 | - |
+
+---
+
+## 2026-07-14 Motor Encoder / Odometry Prep
+
+- M1 calibrated output scale: about 1054 counts/rev.
+- M2 calibrated output scale: about 985 counts/rev after App-layer software x4.
+- Use the calibrated per-wheel constants for later car odometry/INS fusion.
+- Verify M2 DMA continuous capture past 256 raw A-rising edges before relying on it for long runs.
+
+---
+
+## 2026-07-14 INS v1 implementation
+
+- Created `INS_DOCS/` with progress, QA, technical plan, and a user-facing progress text file.
+- Added `APP/inc/app_ins.h` and `APP/src/app_ins.c`.
+- Added a 10ms motor odometry queue from `motor_encoder_task` to `ins_task`.
+- INS v1 uses M1 left = 1054 counts/rev and M2 right = 985 counts/rev.
+- Enabled IMU task startup so INS can consume latest `IMU_Data_t.yaw`.
+- Disabled the old destructive Flash test at `0x00000000`; INS log region starts at `0x00100000`.
+- Added `app_ins.c` to the Keil project file.
+- Keil rebuild passed: `0 Error(s), 1 Warning(s)`.
+- Changed TFT IMU check from `xQueueReceive` to `xQueuePeek` so INS can keep reading latest yaw.
+
+Next validation:
+- Static, straight 1m, in-place 90 degree yaw, rectangle-return, and Flash log tests.
+
+---
+
+## 2026-07-14 INS standardized validation stage
+
+- Initial hand-push test is good enough to continue: about 5cm error on an approximate 100cm straight line; about 2-8cm X and 0.5-2cm Y error after an approximate 60cm square return; yaw error is nearly zero.
+- Current validation is explicitly a non-precision confirmation test.
+- Current data is only for checking INS direction and rough usability; it must not be used for final calibration, fine parameter tuning, or navigation accuracy promises.
+- Do not directly change wheel diameter, wheelbase, or counts/rev from these hand-push results.
+- Switch to precision testing only after the user explicitly says "开始精准测试".
+- Do not refactor the core INS algorithm yet.
+- Do not enter autonomous navigation yet.
+- First run standardized validation and record results in `INS_DOCS/INS_TEST_RECORD.md`.
+
+Validation gates:
+- 1m straight x3: X error < 5cm, Y offset < 3cm.
+- 2m straight x3: X error < 10cm, Y offset < 6cm.
+- 60cm square return x3: final X/Y errors both < 8cm.
+- In-place right turn 90 degrees x3: yaw within -90 deg +/- 8 deg.

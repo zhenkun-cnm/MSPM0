@@ -12,6 +12,8 @@
 #include "app_tb6612.h"
 #include "app_imu.h"
 #include "app_motor_encoder.h"
+#include "app_ins.h"
+#include "app_flash.h"
 #include "dev_led.h"
 #include "dev_encoder.h"
 #include "port_log.h"
@@ -21,7 +23,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include <stdio.h>
  
 /* 编码器→菜单事件队列定义（声明见 app_menu.h） */
 QueueHandle_t g_menuEvtQueue = NULL;
@@ -29,10 +30,11 @@ QueueHandle_t g_menuEvtQueue = NULL;
 /* 外部引用的应用任务 */
 // extern void led_task(void *pvParameters);
 extern void encoder_task(void *pvParameters);
-// extern void flash_init_task(void *pvParameters);
+extern void flash_init_task(void *pvParameters);
 extern void tft_task(void *pvParameters);
 extern void tb6612_task(void *pvParameters);
 extern void motor_encoder_task(void *pvParameters);
+extern void ins_task(void *pvParameters);
  
 /* 任务句柄 */
 static TaskHandle_t s_startTaskHandle;
@@ -67,8 +69,6 @@ void app_start(void)
 static void start_task(void *pvParameters)
 {
     (void)pvParameters;
-
-    setbuf(stdout, NULL);
  
     taskENTER_CRITICAL();
  
@@ -82,6 +82,22 @@ static void start_task(void *pvParameters)
     g_motorCmdQueue = xQueueCreate(MOTOR_CMD_QUEUE_LEN, sizeof(MotorCmd));
     if (g_motorCmdQueue == NULL) {
         LOG_ERROR("[INIT] motor cmd queue create failed!\r\n");
+    }
+
+    /* 创建 IMU 数据队列（imu_task → tft_task，xQueueOverwrite 模式） */
+    g_imuDataQueue = xQueueCreate(IMU_DATA_QUEUE_LEN, sizeof(IMU_Data_t));
+    if (g_imuDataQueue == NULL) {
+        LOG_ERROR("[INIT] IMU data queue create failed!\r\n");
+    }
+
+    g_motorOdomQueue = xQueueCreate(MOTOR_ODOM_QUEUE_LEN, sizeof(MotorOdomDelta_t));
+    if (g_motorOdomQueue == NULL) {
+        LOG_ERROR("[INIT] motor odom queue create failed!\r\n");
+    }
+
+    g_insPoseQueue = xQueueCreate(INS_POSE_QUEUE_LEN, sizeof(INS_Pose_t));
+    if (g_insPoseQueue == NULL) {
+        LOG_ERROR("[INIT] INS pose queue create failed!\r\n");
     }
  
     /* 创建编码器应用任务（内部包含 5ms 周期轮询） */
@@ -127,8 +143,34 @@ static void start_task(void *pvParameters)
     );
     LOG_INFO("  Motor encoder task created (prio=2)\r\n");
 
+    /* 创建 Flash 初始化验证任务 */
+    xTaskCreate(
+        flash_init_task,
+        "flash_init",
+        256,
+        NULL,
+        1,
+        NULL
+    );
+    LOG_INFO("  Flash task created (prio=1)\r\n");
+
     /* 创建 IMU 数据采集任务 (ICM-20608 + LIS3MDLRT, 每 100ms) */
     app_imu_start();
+
+    /* 创建 INS 位姿融合任务：10ms 编码器里程计 + 最新 IMU yaw */
+    BaseType_t insCreateOk = xTaskCreate(
+        ins_task,
+        "ins",
+        512,
+        NULL,
+        2,
+        NULL
+    );
+    if (insCreateOk != pdPASS) {
+        LOG_ERROR("[INIT] INS task create failed!\r\n");
+    } else {
+        LOG_INFO("  INS task created (prio=2)\r\n");
+    }
 
     LOG_INFO("====================================\r\n");
  

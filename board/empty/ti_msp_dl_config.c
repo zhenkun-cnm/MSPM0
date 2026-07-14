@@ -62,6 +62,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_W25Q64_init();
     SYSCFG_DL_DMA_init();
     SYSCFG_DL_SYSTICK_init();
+    SYSCFG_DL_SYSCTL_CLK_init();
     /* Ensure backup structures have no valid state */
 
 	gTB6612_ENABackup.backupRdy 	= false;
@@ -193,16 +194,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
-    DL_GPIO_initDigitalInputFeatures(ICM_ICM_MISO_IOMUX,
-		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
-		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
-
-    DL_GPIO_initDigitalOutput(ICM_ICM_MOSI_IOMUX);
-
-    DL_GPIO_initDigitalOutput(ICM_ICM_CS_IOMUX);
-
-    DL_GPIO_initDigitalOutput(ICM_ICM_SCK_IOMUX);
-
     DL_GPIO_initDigitalOutput(LCD_LCD_RES_IOMUX);
 
     DL_GPIO_initDigitalOutput(LCD_LCD_DC_IOMUX);
@@ -227,16 +218,12 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 
     DL_GPIO_initDigitalOutput(TB6612_BIN2_IOMUX);
 
-    DL_GPIO_clearPins(GPIOA, CS_SPI1_CS_PIN |
-		TB6612_AIN1_PIN |
+    DL_GPIO_clearPins(GPIOA, TB6612_AIN1_PIN |
 		TB6612_BIN2_PIN);
-    DL_GPIO_enableOutput(GPIOA, CS_SPI1_CS_PIN |
-		TB6612_AIN1_PIN |
+    DL_GPIO_enableOutput(GPIOA, TB6612_AIN1_PIN |
 		TB6612_BIN2_PIN);
     DL_GPIO_clearPins(GPIOB, LED_PIN_22_PIN |
-		ICM_ICM_MOSI_PIN |
-		ICM_ICM_CS_PIN |
-		ICM_ICM_SCK_PIN |
+		CS_SPI1_CS_PIN |
 		LCD_LCD_RES_PIN |
 		LCD_LCD_DC_PIN |
 		LCD_LCD_CS_PIN |
@@ -244,9 +231,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		TB6612_AIN2_PIN |
 		TB6612_BIN1_PIN);
     DL_GPIO_enableOutput(GPIOB, LED_PIN_22_PIN |
-		ICM_ICM_MOSI_PIN |
-		ICM_ICM_CS_PIN |
-		ICM_ICM_SCK_PIN |
+		CS_SPI1_CS_PIN |
 		LCD_LCD_RES_PIN |
 		LCD_LCD_DC_PIN |
 		LCD_LCD_CS_PIN |
@@ -339,10 +324,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
 
     
 	DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
-	/* Set default configuration */
-	DL_SYSCTL_disableHFXT();
-	DL_SYSCTL_disableSYSPLL();
-    DL_SYSCTL_setHFCLKSourceHFXTParams(DL_SYSCTL_HFXT_RANGE_32_48_MHZ,0, false);
+    DL_SYSCTL_setHFCLKSourceHFXTParams(DL_SYSCTL_HFXT_RANGE_32_48_MHZ,10, false);
     DL_SYSCTL_configSYSPLL((DL_SYSCTL_SYSPLLConfig *) &gSYSPLLConfig);
 
     /*
@@ -366,6 +348,23 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
     DL_SYSCTL_setMCLKSource(SYSOSC, HSCLK, DL_SYSCTL_HSCLK_SOURCE_SYSPLL);
 
 }
+SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_CLK_init(void) {
+    while ((DL_SYSCTL_getClockStatus() & (DL_SYSCTL_CLK_STATUS_SYSPLL_GOOD
+		 | DL_SYSCTL_CLK_STATUS_HFCLK_GOOD
+		 | DL_SYSCTL_CLK_STATUS_HSCLK_GOOD
+		 | DL_SYSCTL_CLK_STATUS_LFOSC_GOOD))
+	       != (DL_SYSCTL_CLK_STATUS_SYSPLL_GOOD
+		 | DL_SYSCTL_CLK_STATUS_HFCLK_GOOD
+		 | DL_SYSCTL_CLK_STATUS_HSCLK_GOOD
+		 | DL_SYSCTL_CLK_STATUS_LFOSC_GOOD))
+	{
+		/* Ensure that clocks are in default POR configuration before initialization.
+		* Additionally once LFXT is enabled, the internal LFOSC is disabled, and cannot
+		* be re-enabled other than by executing a BOOTRST. */
+		;
+	}
+}
+
 
 
 /*
@@ -496,8 +495,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_I2C_0_init(void) {
 
     /* Configure Controller Mode */
     DL_I2C_resetControllerTransfer(I2C_0_INST);
-    /* Set frequency to 400000 Hz*/
-    DL_I2C_setTimerPeriod(I2C_0_INST, 9);
+    /* Set frequency to 100000 Hz*/
+    DL_I2C_setTimerPeriod(I2C_0_INST, 39);
     DL_I2C_setControllerTXFIFOThreshold(I2C_0_INST, DL_I2C_TX_FIFO_LEVEL_EMPTY);
     DL_I2C_setControllerRXFIFOThreshold(I2C_0_INST, DL_I2C_RX_FIFO_LEVEL_BYTES_1);
     DL_I2C_enableControllerClockStretching(I2C_0_INST);

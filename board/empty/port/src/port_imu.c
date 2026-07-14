@@ -35,6 +35,8 @@
 #define I2C_ERROR_MASK          (DL_I2C_CONTROLLER_STATUS_ERROR | \
                                  DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST)
 #define ICM_I2C_ADDR_ALT        0x69
+#define ICM_PROBE_RETRY_COUNT   8
+#define ICM_PROBE_RETRY_DELAY_MS 150
 
 static bool g_imu_init_ok = false;
 static bool g_i2c_diag_done = false;
@@ -133,25 +135,32 @@ static void i2c_bus_diag_once(void)
 
 static bool icm_select_i2c_addr(void)
 {
-    bool ack68 = i2c_probe_addr(ICM_I2C_ADDR);
-    bool ack69 = i2c_probe_addr(ICM_I2C_ADDR_ALT);
+    for (uint8_t attempt = 1; attempt <= ICM_PROBE_RETRY_COUNT; attempt++) {
+        bool ack68 = i2c_probe_addr(ICM_I2C_ADDR);
+        bool ack69 = i2c_probe_addr(ICM_I2C_ADDR_ALT);
 
-    LOG_RAW("[ICM-20608] Probe ICM addr=0x%02X: %s\r\n",
-            ICM_I2C_ADDR, ack68 ? "ACK" : "NACK");
-    LOG_RAW("[ICM-20608] Probe ICM addr=0x%02X: %s\r\n",
-            ICM_I2C_ADDR_ALT, ack69 ? "ACK" : "NACK");
+        LOG_RAW("[ICM-20608] Probe %u/%u addr=0x%02X: %s\r\n",
+                attempt, ICM_PROBE_RETRY_COUNT, ICM_I2C_ADDR, ack68 ? "ACK" : "NACK");
+        LOG_RAW("[ICM-20608] Probe %u/%u addr=0x%02X: %s\r\n",
+                attempt, ICM_PROBE_RETRY_COUNT, ICM_I2C_ADDR_ALT, ack69 ? "ACK" : "NACK");
 
-    if (ack69) {
-        g_icm_i2c_addr = ICM_I2C_ADDR_ALT;
-    } else if (ack68) {
-        g_icm_i2c_addr = ICM_I2C_ADDR;
-    } else {
-        LOG_RAW("[ICM-20608] FAIL: no ICM address ACK\r\n");
-        return false;
+        if (ack69) {
+            g_icm_i2c_addr = ICM_I2C_ADDR_ALT;
+            LOG_RAW("[ICM-20608] Using ICM addr=0x%02X\r\n", g_icm_i2c_addr);
+            return true;
+        }
+        if (ack68) {
+            g_icm_i2c_addr = ICM_I2C_ADDR;
+            LOG_RAW("[ICM-20608] Using ICM addr=0x%02X\r\n", g_icm_i2c_addr);
+            return true;
+        }
+
+        i2c_prepare_transfer();
+        delay_ms(ICM_PROBE_RETRY_DELAY_MS);
     }
 
-    LOG_RAW("[ICM-20608] Using ICM addr=0x%02X\r\n", g_icm_i2c_addr);
-    return true;
+    LOG_RAW("[ICM-20608] FAIL: no ICM address ACK after retries\r\n");
+    return false;
 }
 
 static bool i2c_write_reg(uint8_t reg, uint8_t data)

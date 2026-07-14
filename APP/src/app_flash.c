@@ -13,9 +13,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define TEST_ADDR           0x00000000  /* 第一页起始地址 */
-static const uint8_t s_writeData[3] = {0x01, 0x02, 0x03};
-
 void flash_init_task(void *pvParameters)
 {
     (void)pvParameters;
@@ -54,37 +51,13 @@ void flash_init_task(void *pvParameters)
     }
 
     /* ────── Step 2: 擦除第一页 ────── */
-    LOG_INFO("  Erasing sector 0x%08lX ...\r\n", (unsigned long)TEST_ADDR);
-    flash->sectorErase(flash, TEST_ADDR);
-    LOG_INFO("  Erase done\r\n");
+    LOG_INFO("  Flash ready; destructive 0x00000000 test skipped\r\n");
 
     /* ────── Step 3: 写入 3 字节 ────── */
-    LOG_INFO("  Writing: %02X %02X %02X ...\r\n",
-             s_writeData[0], s_writeData[1], s_writeData[2]);
-    flash->pageProgram(flash, TEST_ADDR, s_writeData, 3);
-    LOG_INFO("  Write done\r\n");
 
     /* ────── Step 4: 读出验证 ────── */
-    uint8_t readBuf[8] = {0};
-    flash->read(flash, TEST_ADDR, readBuf, 8);
-
-    LOG_INFO("  Read back: ");
-    for (int i = 0; i < 8; i++) {
-        LOG_RAW("%02X ", readBuf[i]);
-    }
-    LOG_RAW("\r\n");
 
     /* ────── Step 5: 结果判定 ────── */
-    bool match = (readBuf[0] == s_writeData[0]) &&
-                 (readBuf[1] == s_writeData[1]) &&
-                 (readBuf[2] == s_writeData[2]);
-
-    if (match) {
-        LOG_INFO("  Verification: PASS\r\n");
-    } else {
-        LOG_INFO("  Verification: FAIL (expected %02X %02X %02X)\r\n",
-                 s_writeData[0], s_writeData[1], s_writeData[2]);
-    }
 
     LOG_INFO("====================================\r\n");
 

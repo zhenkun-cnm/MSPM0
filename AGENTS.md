@@ -68,9 +68,9 @@ Use the `LOG_*` macros from `port_log.h` (`LOG_RAW`/`LOG_ERROR`/`LOG_INFO`/`LOG_
 
 - **LED**: PB22 (`DL_GPIO`).
 - **EC11 encoder**: PA24 (A/CLK), PA25 (B/DT), PA26 (button/SW). Driver in `port_encoder.c` does Gray-code decode + software debounce + a 5-state button FSM (short/long/double-press), GPIO-polled on a 5 ms task tick.
-- **W25Q128 Flash**: hardware **SPI1** (CS in `ti_msp_dl_config`). Full JEDEC ID / 4KB sector erase / page program / read.
-- **ST7735 TFT**: shares hardware **SPI1** with the Flash (PA17 SCK, PA18 MOSI), plus PB13 RESET, PB12 DC, PB11 CS, PB10 BLK.
-- **ICM-20948 IMU**: **software bit-bang SPI** (PB9 SCK, PB8 MOSI, PB7 MISO, PB6 CS), CPOL=0/CPHA=0, ~150 kHz. Bank-switched registers; WHO_AM_I must read 0xEA. SPI clock is capped (~400 kHz) by an LSF0108 level shifter's RC edges — do not raise the bit-bang frequency. See `c:\ti\mspm0_project\ICM-20948.datasheet.md` for the datasheet cache before re-deriving register details.
+- **W25Q64/W25Q128 Flash**: hardware **SPI1** — CS=PB6, MISO/POCI=PB7, MOSI/PICO=PB8, CLK/SCLK=PB9. Full JEDEC ID / 4KB sector erase / page program / read.
+- **ST7735 TFT**: shares hardware **SPI1** with the Flash (PB9 SCK, PB8 MOSI), plus PB10 RESET, PB11 DC, PB14 CS, PB26 BLK.
+- **ICM-20608 IMU**: **I2C0** (PA0=SDA, PA1=SCL, 400kHz Fast mode). WHO_AM_I=0xAF. Includes I2C bus scan diag at init.
 
 ## Working Docs
 

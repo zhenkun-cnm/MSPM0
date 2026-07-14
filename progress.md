@@ -155,3 +155,108 @@ if (ret == pdPASS) {
 
 #### 下一步
 -
+
+---
+
+## 会话 4 - 电机编码器 M2 标定分析
+
+**日期:** 2026-07-14  
+**目标:** 根据桌面测试文本和工程代码解释 M2 每圈约 984/985 的原因，并把结论写入工作记录。
+
+### 已完成
+- [x] 读取 `C:/Users/Lenovo/Desktop/MSPM0_电机编码器_标定结果.txt`
+- [x] 核对 `APP/src/app_motor_encoder.c`、`port_motor_encoder2.c/h`、`ti_msp_dl_config.c/h`
+- [x] 确认 M2 当前路径为 TIMG7 捕获 A 相上升沿 + DMA 快照 B 相 + App 层软件 ×4
+- [x] 修正 M2 注释中的 1:30 / 1560 过期信息，记录为 1:20 / 实测约 985
+- [x] 在 `APP/inc/app_motor_encoder.h` 增加 M1/M2 标定常量
+- [x] 清理 `board/empty/empty.c` 末尾裸露的测试数字
+
+### 关键发现
+- M2 每圈约 984/985 是当前软件折算后的实测标定值：原始 DMA 捕获约 246 个 A 相上升沿/输出轴转，乘 4 后约 984。
+- 惯导/里程计阶段应使用每路独立标定值，而不是强行把两侧都套用 1040 理论值。
+- DMA 配置的持续性仍需硬件验证，尤其是连续运行超过 256 个 A 相上升沿后是否继续写入。
+
+### 下一步
+- [x] 构建验证本次整理没有引入编译错误：Keil rebuild 通过，`0 Error(s), 1 Warning(s)`；warning 为既有 `port_led.c` / `ti_msp_dl_config.h` 的 `LED_PORT` 宏重定义。
+- 后续实现小车惯导时，增加 odometry 层，用 `wheel_distance = counts / counts_per_rev * wheel_circumference` 分别处理左右轮。
+
+---
+
+## 会话 5 - 启用 W25Q64 Flash + 更新引脚文档
+
+**日期:** 2026-07-14
+**目标:** W25Q64 SPI 引脚改用 PB6-PB9（syscfg 已配），开启 flash 任务，串口打印验证，更新所有过期文档。
+
+### 已完成
+- [x] 确认 syscfg/HAL 已将 W25Q64 SPI1 配为 PB6(CS)/PB7(MISO)/PB8(MOSI)/PB9(SCLK)，port_flash.c 无需改
+- [x] `APP/src/app_init.c`: 添加 `#include "app_flash.h"`，取消 `flash_init_task` extern 注释，在 start_task 创建 flash_init 任务
+- [x] `AGENTS.md`: Flash 引脚更新为 PB6-PB9，TFT 引脚与 syscfg 对齐，IMU 改为 ICM-20608 I2C
+- [x] `task_plan.md`: 更新外设引脚表（W25Q64 SPI1 + ST7735 + ICM-20608 I2C0）
+
+### 关键发现
+- IMU 已从 ICM-20948 bit-bang SPI 迁移到 ICM-20608 I2C（PA0/PA1），PB6-PB9 已完全释放给 Flash 使用
+- `app_flash.c` 初始化时会串口打印 JEDEC ID + 擦写读验证结果，满足"串口打印是否正常"的需求
+
+### 下一步
+- Keil 编译验证
+
+
+---
+
+## 会话 6 - 小车 INS 第一版代码接入
+
+**日期:** 2026-07-14
+**目标:** 建立第一版二维位姿估计：编码器算距离，IMU yaw 算方向，串口与 Flash 记录输出。
+
+### 已完成
+- [x] 新建 `INS_DOCS/` 专题文档目录。
+- [x] 新建 `INS_PROGRESS.md`、`INS_QA.md`、`INS_TECH_PLAN.md`。
+- [x] 新建 `INS_PROGRESS_FOR_USER.txt`，用问答形式给用户直接查看当前进度。
+- [x] 新增 `app_ins` 模块，输出 `x_m / y_m / yaw_deg / v_mps / w_dps`。
+- [x] 编码器任务新增 10ms `MotorOdomDelta_t` 队列，供 INS 消费左右轮增量。
+- [x] `app_init.c` 创建 INS/里程计队列，启动 IMU 和 INS 任务。
+- [x] `app_flash.c` 停止旧的 `0x00000000` 擦写验证，避免破坏后续日志/参数。
+- [x] Keil 工程文件加入 `app_ins.c`。
+
+### 待验证
+- [x] Keil rebuild：`0 Error(s), 1 Warning(s)`，warning 为既有 `LED_PORT` 宏重定义。
+- [ ] 静止、直线 1m、原地 90 度、矩形路径四组上车测试。
+- [ ] 根据测试结果决定是否修正 `INS_IMU_YAW_SIGN`、轮距、左右轮标定。
+
+### 额外修正
+- [x] `APP/src/app_tft.c` 的 IMU 检查页面改为 `xQueuePeek`，避免 TFT 把 IMU yaw 队列消费掉，影响 INS 读取最新姿态。
+
+### 2026-07-14 INS 输出时序修正
+- [x] `ins_task` 改为等待第一帧 IMU yaw 后才进入 ready 状态。
+- [x] 等待期间不打印 `X/Y/YAW`，不累计编码器里程，避免 IMU 校准阶段污染起点。
+- [x] Ready 后打印 `[INS] Ready: yaw zero=...`，之后才输出位姿日志。
+- [x] Keil rebuild 通过：`0 Error(s), 1 Warning(s)`。
+
+---
+
+## 会话 7 - INS 手推测试判断与标准化确认计划
+
+**日期:** 2026-07-14
+**目标:** 根据初步手推测试结果判断是否进入下一阶段，并建立标准化测试记录流程。
+
+### 用户提供的测试结果
+- 直线长度约 100cm，误差约 5cm；用户说明 100cm 不一定标准，且为手推测试。
+- 正方形边长约 60cm，手推回到原点；X 误差约 2cm 到 8cm，Y 误差约 0.5cm 到 2cm，偏航角几乎无误差。
+
+### 判断
+- [x] 第一版 INS 已经可用，不需要大范围返工。
+- [x] 当前测试条件不足以做精确标定。
+- [x] 当前阶段明确按“非精准确认测试”执行。
+- [x] 当前测试数据不用于直接修改轮径、轮距或 counts/rev。
+- [x] 只有用户明确说“开始精准测试”时，才切换到精准测试流程。
+- [x] 先做标准化确认测试，通过后再进入“惯导复位/校准命令 + 串口测试菜单 + Flash 日志读取方案”。
+
+### 已完成
+- [x] 新增 `INS_DOCS/INS_STANDARD_TEST_PLAN.md`。
+- [x] 新增 `INS_DOCS/INS_TEST_RECORD.md`。
+- [x] 更新 `INS_PROGRESS.md`、`INS_PROGRESS_FOR_USER.txt`、`INS_TECH_PLAN.md`。
+- [x] 在 INS 测试文档和工程总记录中增加“非精准测试”标记。
+
+### 下一步
+- [ ] 用户按记录表完成 1m/2m 直线、60cm 正方形、右转 90 度测试。
+- [ ] 根据记录决定进入下一阶段或修正轮径/轮距/yaw。

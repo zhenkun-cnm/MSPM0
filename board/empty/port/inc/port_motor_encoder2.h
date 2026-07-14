@@ -4,10 +4,10 @@
  * @note    硬件架构: TIMG7 Edge-Time Capture (PA28 = A相) + DMA 环形搬运
  *          DMA 源地址 = &GPIOA->DIN31_0 (硬件总线快照, 含 PA29 = B相)
  *          每次 A 相上升沿触发 DMA, 将 32-bit GPIO 快照写入环形缓冲区
- *          10ms 软件轮询解码: 从环形缓冲区快照序列中提取 A/B 相跳变, 判向计数
+ *          10ms 软件轮询解码: 读取 A 相上升沿快照中的 B 相电平, 判向计数
  *
- *          编码器参数: 13 线 × 4 倍频 = 52 脉冲/电机转
- *          减速比 1:30 → 1560 脉冲/输出轴转
+ *          编码器参数: DMA 1x 捕获, App 层乘 4 折算
+ *          减速比 1:20, 实测约 985 脉冲/输出轴转
  */
 #ifndef PORT_MOTOR_ENCODER2_H
 #define PORT_MOTOR_ENCODER2_H
@@ -20,7 +20,7 @@ extern "C" {
 
 /**
  * @brief 环形缓冲区大小 (条目数, 每条 32-bit)
- * @note  10ms 内最大捕获脉冲数 < 256 (对应 ~1476 RPM 输出轴 @ 30减速比)
+ * @note  10ms 内最大原始捕获数 < 256 (软件 4x 折算后 < 1024 counts)
  */
 #define ENC2_BUF_SIZE  256U
 

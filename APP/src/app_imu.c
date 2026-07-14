@@ -12,10 +12,18 @@
 #include "task.h"
 #include <math.h>
 
+/* IMU 数据队列（imu_task → tft_task，在 app_init.c 中创建） */
+QueueHandle_t g_imuDataQueue = NULL;
+
+/* 模块级缓存：上一次的 yaw 数据来源 */
+static char g_lastYawSrc = 'G';
+
 #define IMU_TASK_STACK_SIZE      768
 #define IMU_TASK_PRIORITY        (tskIDLE_PRIORITY + 1)
 #define IMU_TASK_PERIOD_MS       10
-#define IMU_PRINT_PERIOD_MS      100
+#define IMU_PRINT_PERIOD_MS      1000
+#define IMU_INIT_RETRY_COUNT     5
+#define IMU_INIT_RETRY_DELAY_MS  500
 
 #define ACCEL_SENSITIVITY        2048.0f
 #define GYRO_SENSITIVITY         16.4f
@@ -213,7 +221,14 @@ static void imu_task(void *arg)
     TickType_t lastPrint;
     (void)arg;
 
-    PORT_IMU_Init();
+    for (int attempt = 1; attempt <= IMU_INIT_RETRY_COUNT; attempt++) {
+        PORT_IMU_Init();
+        if (PORT_IMU_IsOk()) {
+            break;
+        }
+        LOG_RAW("[ATT] ICM init retry %d/%d\r\n", attempt, IMU_INIT_RETRY_COUNT);
+        vTaskDelay(pdMS_TO_TICKS(IMU_INIT_RETRY_DELAY_MS));
+    }
     PORT_LIS3MDL_Init();
 
     if (!PORT_IMU_IsOk()) {
@@ -275,10 +290,24 @@ static void imu_task(void *arg)
         if ((xTaskGetTickCount() - lastPrint) >= pdMS_TO_TICKS(IMU_PRINT_PERIOD_MS)) {
             float roll, pitch, yaw;
             char yawSource = magUsed ? 'M' : (stillLock ? 'B' : 'G');
+            g_lastYawSrc = yawSource;
             lastPrint = xTaskGetTickCount();
             ahrs9_get_euler(&roll, &pitch, &yaw);
-            LOG_RAW("[ATT] R:%+7.2f P:%+7.2f Y:%+7.2f YSRC:%c\r\n",
-                    roll, pitch, yaw, yawSource);
+//            LOG_RAW("[ATT] R:%+7.2f P:%+7.2f Y:%+7.2f YSRC:%c\r\n",
+//                    roll, pitch, yaw, yawSource);
+        }
+
+        {
+            float r, p, y;
+            ahrs9_get_euler(&r, &p, &y);
+            IMU_Data_t data;
+            data.roll = r;
+            data.pitch = p;
+            data.yaw = y;
+            data.yawSource = g_lastYawSrc;
+            if (g_imuDataQueue != NULL) {
+                xQueueOverwrite(g_imuDataQueue, &data);
+            }
         }
 
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(IMU_TASK_PERIOD_MS));
@@ -287,7 +316,12 @@ static void imu_task(void *arg)
 
 void app_imu_start(void)
 {
-    xTaskCreate(imu_task, "imu_task",
-                IMU_TASK_STACK_SIZE, NULL,
-                IMU_TASK_PRIORITY, NULL);
+    BaseType_t ok = xTaskCreate(imu_task, "imu_task",
+                                IMU_TASK_STACK_SIZE, NULL,
+                                IMU_TASK_PRIORITY, NULL);
+    if (ok != pdPASS) {
+        LOG_ERROR("[ATT] imu_task create failed\r\n");
+    } else {
+        LOG_INFO("[ATT] imu_task created\r\n");
+    }
 }

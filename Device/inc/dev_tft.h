@@ -11,9 +11,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* TFT 屏幕参数 */
+/* TFT 屏幕参数（中景园 ZJY180S0800TG01 1.8寸 128x160 横屏使用 → 160x128） */
 #define TFT_WIDTH       160
-#define TFT_HEIGHT      80
+#define TFT_HEIGHT      128
 
 /* TFT 色彩定义 (RGB565) */
 #define TFT_BLACK       0x0000

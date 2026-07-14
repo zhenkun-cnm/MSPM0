@@ -279,7 +279,6 @@ void SYSCFG_DL_init(void);
 void SYSCFG_DL_initPower(void);
 void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
-void SYSCFG_DL_SYSCTL_CLK_init(void);
 
 bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 void SYSCFG_DL_DC_MOTOR_init(void);

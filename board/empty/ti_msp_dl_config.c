@@ -62,7 +62,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_W25Q64_init();
     SYSCFG_DL_DMA_init();
     SYSCFG_DL_SYSTICK_init();
-    SYSCFG_DL_SYSCTL_CLK_init();
     /* Ensure backup structures have no valid state */
 
 	gTB6612_ENABackup.backupRdy 	= false;
@@ -324,7 +323,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
 
     
 	DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
-    DL_SYSCTL_setHFCLKSourceHFXTParams(DL_SYSCTL_HFXT_RANGE_32_48_MHZ,10, false);
+	/* Set default configuration */
+	DL_SYSCTL_disableHFXT();
+	DL_SYSCTL_disableSYSPLL();
+    DL_SYSCTL_setHFCLKSourceHFXTParams(DL_SYSCTL_HFXT_RANGE_32_48_MHZ,0, false);
     DL_SYSCTL_configSYSPLL((DL_SYSCTL_SYSPLLConfig *) &gSYSPLLConfig);
 
     /*
@@ -348,23 +350,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
     DL_SYSCTL_setMCLKSource(SYSOSC, HSCLK, DL_SYSCTL_HSCLK_SOURCE_SYSPLL);
 
 }
-SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_CLK_init(void) {
-    while ((DL_SYSCTL_getClockStatus() & (DL_SYSCTL_CLK_STATUS_SYSPLL_GOOD
-		 | DL_SYSCTL_CLK_STATUS_HFCLK_GOOD
-		 | DL_SYSCTL_CLK_STATUS_HSCLK_GOOD
-		 | DL_SYSCTL_CLK_STATUS_LFOSC_GOOD))
-	       != (DL_SYSCTL_CLK_STATUS_SYSPLL_GOOD
-		 | DL_SYSCTL_CLK_STATUS_HFCLK_GOOD
-		 | DL_SYSCTL_CLK_STATUS_HSCLK_GOOD
-		 | DL_SYSCTL_CLK_STATUS_LFOSC_GOOD))
-	{
-		/* Ensure that clocks are in default POR configuration before initialization.
-		* Additionally once LFXT is enabled, the internal LFOSC is disabled, and cannot
-		* be re-enabled other than by executing a BOOTRST. */
-		;
-	}
-}
-
 
 
 /*

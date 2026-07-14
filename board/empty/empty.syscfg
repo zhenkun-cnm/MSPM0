@@ -54,7 +54,6 @@ mux12.inputSelect = "zSYSPLLMUX_HFCLK";
 const pinFunction4     = system.clockTree["HFXT"];
 pinFunction4.inputFreq = 40;
 pinFunction4.enable    = true;
-pinFunction4.HFXTStartup = 10;
 
 CAPTURE1.$name                              = "TB6612_ENB";
 CAPTURE1.timerPeriod                        = "0.8ms";
@@ -211,12 +210,8 @@ SPI1.peripheral.sclkPin.$assign         = "PB9";
 SPI1.peripheral.mosiPin.$assign         = "PB8";
 SPI1.peripheral.misoPin.$assign         = "PB7";
 
-SYSCTL.clockTreeEn     = true;
-SYSCTL.useHFCLK_Manual = true;
-SYSCTL.HFCLKSource     = "HFXT";
-SYSCTL.HFCLKMonitor    = true;
-SYSCTL.HFCLK_Freq      = 40000000;
-SYSCTL.HFXTStartup     = 10;
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn           = true;
 
 SYSTICK.periodEnable      = true;
 SYSTICK.interruptEnable   = true;

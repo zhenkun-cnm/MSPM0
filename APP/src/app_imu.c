@@ -17,6 +17,7 @@ QueueHandle_t g_imuDataQueue = NULL;
 
 /* 模块级缓存：上一次的 yaw 数据来源 */
 static char g_lastYawSrc = 'G';
+static bool g_imuTaskStarted = false;
 
 #define IMU_TASK_STACK_SIZE      768
 #define IMU_TASK_PRIORITY        (tskIDLE_PRIORITY + 1)
@@ -316,12 +317,18 @@ static void imu_task(void *arg)
 
 void app_imu_start(void)
 {
+    if (g_imuTaskStarted) {
+        LOG_INFO("[ATT] imu_task already created\r\n");
+        return;
+    }
+
     BaseType_t ok = xTaskCreate(imu_task, "imu_task",
                                 IMU_TASK_STACK_SIZE, NULL,
                                 IMU_TASK_PRIORITY, NULL);
     if (ok != pdPASS) {
         LOG_ERROR("[ATT] imu_task create failed\r\n");
     } else {
+        g_imuTaskStarted = true;
         LOG_INFO("[ATT] imu_task created\r\n");
     }
 }

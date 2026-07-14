@@ -147,7 +147,7 @@ GPIO6.associatedPins[3].pin.$assign = "PA23";
 
 I2C1.$name                           = "I2C_0";
 I2C1.basicEnableController           = true;
-I2C1.basicControllerStandardBusSpeed = "Standard";
+I2C1.basicControllerStandardBusSpeed = "Fast";
 I2C1.peripheral.$assign              = "I2C0";
 I2C1.peripheral.sdaPin.$assign       = "PA0";
 I2C1.peripheral.sclPin.$assign       = "PA1";

@@ -143,6 +143,8 @@ static void start_task(void *pvParameters)
     );
     LOG_INFO("  Motor encoder task created (prio=2)\r\n");
 
+    app_imu_start();
+
     /* 创建 Flash 初始化验证任务 */
     xTaskCreate(
         flash_init_task,

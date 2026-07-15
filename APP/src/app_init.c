@@ -83,6 +83,11 @@ static void start_task(void *pvParameters)
     if (g_motorCmdQueue == NULL) {
         LOG_ERROR("[INIT] motor cmd queue create failed!\r\n");
     }
+
+    g_motorOdomQueue = xQueueCreate(MOTOR_ODOM_QUEUE_LEN, sizeof(MotorOdomDelta_t));
+    if (g_motorOdomQueue == NULL) {
+        LOG_ERROR("[INIT] motor odom queue create failed!\r\n");
+    }
  
     /* 创建编码器应用任务（内部包含 5ms 周期轮询） */
     xTaskCreate(

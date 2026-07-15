@@ -1,8 +1,9 @@
 /**
  * @file    port_tft.h
- * @brief   Port 层 TFT (ST7735) 驱动接口
+ * @brief   Port 层 TFT (ST7735S) 驱动接口
  * @note    四层解耦架构 - Port 层
  *          实现 dev_tft.h 的 DevTFT OOP 契约
+ *          适配中景园 ZJY180S0800TG01 1.8寸 128x160 模块（横屏 160x128）
  */
 
 #ifndef PORT_TFT_H

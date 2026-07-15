@@ -3,7 +3,7 @@
  * @brief   Port 层 ST7735 TFT 彩屏驱动实现
  * @note    实现 dev_tft.h 的 DevTFT OOP 契约
  *          使用 SPI1 硬件外设（与 W25Q128 共用 PA17=SCK, PA18=MOSI）
- *          CS(PB11) / DC(PB12) / RESET(PB13) / BLK(PB10) 使用 GPIO 控制
+ *          SPI_SCL(PB9) / SPI_SDA(PB8) / RES(PB10) / DC(PB11) / CS(PB14) / BLK(PB26) 使用 GPIO 控制
  *
  *          引脚电平初始态（用户默认全低）需在初始化时纠正为工作电平：
  *          - RESET: 低有效 → 初始拉低→延时→拉高完成硬件复位
@@ -102,12 +102,12 @@ static DevTFT s_tftIf;
 #define MADCTL_MH           0x04
 
 /* ================================================================
- *  0.96" 80x160 ST7735S 面板可视区在 GRAM 中的偏移
- *  横屏 (MV=1)：X(列) 偏移 1，Y(行) 偏移 26
- *  若实测仍有错位，按面板批次微调（常见组合 0/24、1/26、2/1 等）
+ *  1.8" 128x160 ST7735S 面板（中景园 ZJY180S0800TG01）
+ *  横屏 (MV=1)：GM[1:0]="11" 模式下芯片自动映射，偏移为 0
+ *  若实测仍有错位，微调（常见偏移 ±2 以内）
  * ================================================================ */
-#define TFT_COL_OFFSET      1U
-#define TFT_ROW_OFFSET      26U
+#define TFT_COL_OFFSET      0U
+#define TFT_ROW_OFFSET      0U
 
 /* ================================================================
  *  延时函数
@@ -220,22 +220,22 @@ static void tft_set_window(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
  * ================================================================ */
 static void tft_gpio_init(void)
 {
-    /* CS (PB11) - 输出，初始高电平（不选中） */
+    /* CS (PB14) - 输出，初始高电平（不选中） */
     DL_GPIO_initDigitalOutput(LCD_LCD_CS_IOMUX);
     TFT_CS_HIGH();
     DL_GPIO_enableOutput(TFT_PORT, TFT_CS_PIN);
 
-    /* DC (PB12) - 输出，初始低电平（命令模式） */
+    /* DC (PB11) - 输出，初始低电平（命令模式） */
     DL_GPIO_initDigitalOutput(LCD_LCD_DC_IOMUX);
     TFT_DC_LOW();
     DL_GPIO_enableOutput(TFT_PORT, TFT_DC_PIN);
 
-    /* RESET (PB13) - 输出，初始低电平（准备复位） */
+    /* RESET (PB10) - 输出，初始低电平（准备复位） */
     DL_GPIO_initDigitalOutput(LCD_LCD_RES_IOMUX);
     TFT_RES_LOW();
     DL_GPIO_enableOutput(TFT_PORT, TFT_RES_PIN);
 
-    /* BLK (PB10) - 输出，初始高电平（点亮背光） */
+    /* BLK (PB26) - 输出，初始高电平（点亮背光） */
     DL_GPIO_initDigitalOutput(LCD_LCD_BLK_IOMUX);
     TFT_BLK_HIGH();
     DL_GPIO_enableOutput(TFT_PORT, TFT_BLK_PIN);
@@ -254,8 +254,8 @@ static void tft_hardware_reset(void)
 }
 
 /* ================================================================
- *  ST7735 初始化序列（标准 ST7735R 初始化 + Gamma 校正）
- *  适配 0.96 寸 80x160 模块
+ *  ST7735S 初始化序列（标准初始化 + Gamma 校正）
+ *  适配中景园 ZJY180S0800TG01 1.8 寸 128x160 模块（横屏 160x128）
  * ================================================================ */
 static void tft_init_sequence(void)
 {
@@ -325,14 +325,14 @@ static void tft_init_sequence(void)
     tft_write_command(ST7735_COLMOD);
     tft_write_data(0x05);       /* 16-bit/pixel */
 
-    /* 9. 列/行地址设置为 160x80 全屏（MV=1 时 X/Y 交换，含面板偏移） */
+    /* 9. 列/行地址设置为 160x128 全屏（MV=1 时 X/Y 交换，含面板偏移） */
     tft_write_command(ST7735_CASET);
     tft_write_data16(TFT_COL_OFFSET);
     tft_write_data16(TFT_COL_OFFSET + TFT_WIDTH - 1);    /* 160 列 (0-159) + 偏移 */
 
     tft_write_command(ST7735_RASET);
     tft_write_data16(TFT_ROW_OFFSET);
-    tft_write_data16(TFT_ROW_OFFSET + TFT_HEIGHT - 1);   /* 80 行 (0-79) + 偏移 */
+    tft_write_data16(TFT_ROW_OFFSET + TFT_HEIGHT - 1);   /* 128 行 (0-127) + 偏移 */
 
     /* 10. Gamma 校正（正极性） */
     tft_write_command(ST7735_GMCTRP1);

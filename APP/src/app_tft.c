@@ -102,12 +102,12 @@ static const MenuItem rootItems[] = {
 #define ROOT_ITEM_COUNT     (sizeof(rootItems) / sizeof(rootItems[0]))
 
 /* ================================================================
- *  Render parameters
+ *  Render parameters (1.8" 160x128: 8 rows total, 7 visible + 1 status)
  * ================================================================ */
 #define MENU_ROW_H          16U
-#define MENU_MAX_ROWS       (TFT_HEIGHT / MENU_ROW_H)        /* =5 */
+#define MENU_MAX_ROWS       (TFT_HEIGHT / MENU_ROW_H)        /* =8 */
 
-/* Visible rows: full screen minus 1 status line = 4 */
+/* Visible rows: full screen minus 1 status line = 7 */
 #define MENU_VISIBLE_ROWS   (MENU_MAX_ROWS - 1)
 
 #define KEY_STATUS_Y        (TFT_HEIGHT - MENU_ROW_H)

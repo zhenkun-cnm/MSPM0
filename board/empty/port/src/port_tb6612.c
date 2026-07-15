@@ -38,9 +38,9 @@ static TB6612_Dir s_dir    = TB6612_DIR_COAST;
 
 static void dir_set_forward(void)
 {
-    /* A 通道 */
-    DL_GPIO_setPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
-    DL_GPIO_clearPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+    /* A 通道 (M1): AIN1=L AIN2=H → Forward */
+    DL_GPIO_clearPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
+    DL_GPIO_setPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
     /* B 通道 */
     DL_GPIO_setPins(TB6612_BIN1_PORT, TB6612_BIN1_PIN);
     DL_GPIO_clearPins(TB6612_BIN2_PORT, TB6612_BIN2_PIN);
@@ -48,8 +48,10 @@ static void dir_set_forward(void)
 
 static void dir_set_reverse(void)
 {
-    DL_GPIO_clearPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
-    DL_GPIO_setPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+    /* A 通道 (M1): AIN1=H AIN2=L → Reverse */
+    DL_GPIO_setPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
+    DL_GPIO_clearPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+    /* B 通道 */
     DL_GPIO_clearPins(TB6612_BIN1_PORT, TB6612_BIN1_PIN);
     DL_GPIO_setPins(TB6612_BIN2_PORT, TB6612_BIN2_PIN);
 }

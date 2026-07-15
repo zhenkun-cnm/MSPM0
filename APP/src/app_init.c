@@ -29,7 +29,7 @@ QueueHandle_t g_menuEvtQueue = NULL;
 /* 外部引用的应用任务 */
 // extern void led_task(void *pvParameters);
 extern void encoder_task(void *pvParameters);
-// extern void flash_init_task(void *pvParameters);
+extern void flash_init_task(void *pvParameters);
 extern void tft_task(void *pvParameters);
 extern void tb6612_task(void *pvParameters);
 extern void motor_encoder_task(void *pvParameters);
@@ -134,6 +134,17 @@ static void start_task(void *pvParameters)
 
     /* 创建 IMU 数据采集任务 (ICM-20608 + LIS3MDLRT, 每 100ms) */
     app_imu_start();
+
+    /* 创建 Flash 开机自检任务 (W25Q64, 最低优先级, 完成后自动删除) */
+    xTaskCreate(
+        flash_init_task,
+        "flash_test",
+        256,
+        NULL,
+        1,
+        NULL
+    );
+    LOG_INFO("  Flash test task created (prio=1)\r\n");
 
     LOG_INFO("====================================\r\n");
  

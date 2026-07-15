@@ -1,6 +1,6 @@
 /**
  * @file    port_flash.h
- * @brief   Port 层 W25Q128 Flash 驱动声明
+ * @brief   Port 层 W25Q64 Flash 驱动声明
  * @note    实现 dev_flash.h 定义的 DevFlash OOP 契约
  *          内部调用 SPI1 + GPIO CS 操作 Flash
  */

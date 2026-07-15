@@ -5,6 +5,7 @@
  *          通过 Device 句柄操作 Flash
  *          1. 读取 JEDEC ID
  *          2. 擦除第一页 → 写入 0x01 0x02 0x03 → 读出验证
+ *          支持 W25Q64（8MB, EF 40 17）
  */
 
 #include "app_flash.h"
@@ -38,12 +39,22 @@ void flash_init_task(void *pvParameters)
         LOG_INFO("  Flash JEDEC ID: %02X %02X %02X\r\n",
                  id.manufacturer, id.memoryType, id.capacity);
 
+        /* W25Q64: manufacturer = EF, memoryType = 40, capacity = 17 (64M-bit / 8MB) */
         if (id.manufacturer == 0xEF && id.memoryType == 0x40) {
             uint32_t sizeMB = 0;
-            if (id.capacity == 0x18) sizeMB = 16;
-            else if (id.capacity == 0x17) sizeMB = 8;
-            else if (id.capacity == 0x19) sizeMB = 32;
-            LOG_INFO("  Detected: Winbond SPI Flash (%uMB)\r\n", sizeMB);
+            if (id.capacity == 0x17) {
+                sizeMB = 8;     /* W25Q64: 64M-bit = 8MB */
+            } else if (id.capacity == 0x18) {
+                sizeMB = 16;    /* W25Q128: 128M-bit = 16MB */
+            } else if (id.capacity == 0x19) {
+                sizeMB = 32;    /* W25Q256: 256M-bit = 32MB */
+            } else {
+                LOG_INFO("  Detected: Winbond SPI Flash (capacity=0x%02X)\r\n",
+                         id.capacity);
+            }
+            if (sizeMB > 0) {
+                LOG_INFO("  Detected: Winbond SPI Flash (%uMB)\r\n", sizeMB);
+            }
         } else {
             LOG_INFO("  Warning: Unknown Flash (manuf=%02X)\r\n", id.manufacturer);
         }
@@ -55,13 +66,22 @@ void flash_init_task(void *pvParameters)
 
     /* ────── Step 2: 擦除第一页 ────── */
     LOG_INFO("  Erasing sector 0x%08lX ...\r\n", (unsigned long)TEST_ADDR);
-    flash->sectorErase(flash, TEST_ADDR);
+    if (!flash->sectorErase(flash, TEST_ADDR)) {
+        LOG_ERROR("[FLASH] Sector erase FAILED at 0x%08lX!\r\n",
+                  (unsigned long)TEST_ADDR);
+        vTaskDelete(NULL);
+        return;
+    }
     LOG_INFO("  Erase done\r\n");
 
     /* ────── Step 3: 写入 3 字节 ────── */
     LOG_INFO("  Writing: %02X %02X %02X ...\r\n",
              s_writeData[0], s_writeData[1], s_writeData[2]);
-    flash->pageProgram(flash, TEST_ADDR, s_writeData, 3);
+    if (!flash->pageProgram(flash, TEST_ADDR, s_writeData, 3)) {
+        LOG_ERROR("[FLASH] Page program FAILED!\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
     LOG_INFO("  Write done\r\n");
 
     /* ────── Step 4: 读出验证 ────── */

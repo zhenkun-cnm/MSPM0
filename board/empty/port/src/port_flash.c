@@ -1,6 +1,6 @@
 /**
  * @file    port_flash.c
- * @brief   Port 层 W25Q128 Flash 驱动实现
+ * @brief   Port 层 W25Q64 Flash 驱动实现
  * @note    实现 dev_flash.h 的 DevFlash OOP 契约
  *          使用 SPI1 硬件外设 + GPIO CS 控制
  *          调用 SysConfig 生成的 SYSCFG_DL_W25Q64_init() 初始化 SPI
@@ -81,20 +81,26 @@ static void cmd_write_enable(void)
     PORT_FLASH_CS_High();
 }
 
-/* 等待 BUSY 完成 */
-static void cmd_wait_busy(void)
+/* 等待 BUSY 完成，返回 false 表示超时 */
+static bool cmd_wait_busy(void)
 {
     uint32_t timeout;
+    uint8_t sr;
 
     PORT_FLASH_CS_Low();
     PORT_FLASH_SPI_TransferByte(CMD_READ_STATUS1);
 
     timeout = SPI_TIMEOUT_CNT;
-    while (PORT_FLASH_SPI_TransferByte(0xFF) & SR1_BUSY) {
-        if (--timeout == 0) break;
-    }
+    do {
+        sr = PORT_FLASH_SPI_TransferByte(0xFF);
+        if (--timeout == 0) {
+            PORT_FLASH_CS_High();
+            return false;
+        }
+    } while (sr & SR1_BUSY);
 
     PORT_FLASH_CS_High();
+    return true;
 }
 
 /* 发送 24-bit 地址（MSB first） */
@@ -137,6 +143,12 @@ static bool flash_readJEDECID(DevFlash *self, DevFlash_JEDECID_t *id)
     buf[2] = PORT_FLASH_SPI_TransferByte(0xFF);
     PORT_FLASH_CS_High();
 
+    /* 防错：若读回全 0xFF 或全 0x00，说明 SPI 无响应 */
+    if ((buf[0] == 0xFF && buf[1] == 0xFF && buf[2] == 0xFF) ||
+        (buf[0] == 0x00 && buf[1] == 0x00 && buf[2] == 0x00)) {
+        return false;
+    }
+
     id->manufacturer = buf[0];
     id->memoryType   = buf[1];
     id->capacity     = buf[2];
@@ -155,9 +167,7 @@ static bool flash_sectorErase(DevFlash *self, uint32_t address)
     send_address(address);
     PORT_FLASH_CS_High();
 
-    cmd_wait_busy();
-
-    return true;
+    return cmd_wait_busy();
 }
 
 static bool flash_pageProgram(DevFlash *self, uint32_t address,
@@ -181,9 +191,7 @@ static bool flash_pageProgram(DevFlash *self, uint32_t address,
     }
     PORT_FLASH_CS_High();
 
-    cmd_wait_busy();
-
-    return true;
+    return cmd_wait_busy();
 }
 
 static bool flash_read(DevFlash *self, uint32_t address,

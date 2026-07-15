@@ -15,8 +15,8 @@
 /* JEDEC ID 结构：3 字节（厂商 + 型号 + 容量） */
 typedef struct {
     uint8_t manufacturer;   /* EF = Winbond */
-    uint8_t memoryType;     /* 40 = W25Q128 */
-    uint8_t capacity;       /* 18 = 128M-bit */
+    uint8_t memoryType;     /* 40 = W25Q64 */
+    uint8_t capacity;       /* 17 = 64M-bit */
 } DevFlash_JEDECID_t;
 
 /* Flash 设备接口结构体（OOP 契约） */

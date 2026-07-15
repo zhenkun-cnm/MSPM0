@@ -61,6 +61,17 @@ void LOG_OutputChar(char c);
     #define LOG_DEBUG(fmt, ...)
 #endif
 
+/* ──────── 周期性信息打印开关（独立控制） ──────── */
+#ifndef LOG_PRINT_INS_ENABLE
+#define LOG_PRINT_INS_ENABLE     0   /* app_ins.c: [INS] 位姿 */
+#endif
+#ifndef LOG_PRINT_ATT_ENABLE
+#define LOG_PRINT_ATT_ENABLE     0   /* app_imu.c: [ATT] 姿态 */
+#endif
+#ifndef LOG_PRINT_MOTOR_ENABLE
+#define LOG_PRINT_MOTOR_ENABLE   0   /* app_motor_encoder.c: M1/M2 编码器 */
+#endif
+
 /**
  * @brief 内部 printf 格式化输出引擎
  */

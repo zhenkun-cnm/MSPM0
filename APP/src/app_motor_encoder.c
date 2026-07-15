@@ -59,7 +59,9 @@ void motor_encoder_task(void *pvParameters)
 
              if (printCnt >= 1)
              {
-                 //LOG_RAW("M1:%+ld M2:%+ld\r\n", (long)m1Accum, (long)m2Accum);
+#if LOG_PRINT_MOTOR_ENABLE
+                 LOG_RAW("M1:%+ld M2:%+ld\r\n", (long)m1Accum, (long)m2Accum);
+#endif
                  m1Accum  = 0;
                  m2Accum  = 0;
                  printCnt = 0;

@@ -10,12 +10,13 @@
 #include "port_log.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include <math.h>
 
 #define IMU_TASK_STACK_SIZE      768
 #define IMU_TASK_PRIORITY        (tskIDLE_PRIORITY + 1)
 #define IMU_TASK_PERIOD_MS       10
-#define IMU_PRINT_PERIOD_MS      100
+#define IMU_PRINT_PERIOD_MS      1000
 
 #define ACCEL_SENSITIVITY        2048.0f
 #define GYRO_SENSITIVITY         16.4f
@@ -33,6 +34,8 @@
 #define MAG2D_GATE_LOW           0.65f
 #define MAG2D_GATE_HIGH          1.45f
 #define MAG2D_MAX_TILT_DEG       25.0f
+
+QueueHandle_t g_imuDataQueue = NULL;
 
 typedef struct {
     float gx;
@@ -272,13 +275,24 @@ static void imu_task(void *arg)
                      mxCal, myCal, mzCal,
                      (float)IMU_TASK_PERIOD_MS / 1000.0f);
 
+        {
+            IMU_Data_t data;
+            ahrs9_get_euler(&data.roll, &data.pitch, &data.yaw);
+            data.yawSource = magUsed ? 'M' : (stillLock ? 'B' : 'G');
+            if (g_imuDataQueue != NULL) {
+                xQueueOverwrite(g_imuDataQueue, &data);
+            }
+        }
+
         if ((xTaskGetTickCount() - lastPrint) >= pdMS_TO_TICKS(IMU_PRINT_PERIOD_MS)) {
             float roll, pitch, yaw;
             char yawSource = magUsed ? 'M' : (stillLock ? 'B' : 'G');
             lastPrint = xTaskGetTickCount();
             ahrs9_get_euler(&roll, &pitch, &yaw);
+#if LOG_PRINT_ATT_ENABLE
             LOG_RAW("[ATT] R:%+7.2f P:%+7.2f Y:%+7.2f YSRC:%c\r\n",
                     roll, pitch, yaw, yawSource);
+#endif
         }
 
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(IMU_TASK_PERIOD_MS));

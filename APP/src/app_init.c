@@ -24,8 +24,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "semphr.h"
 #include <stdio.h>
- #include "freertosconfig.h"
 /* 编码器→菜单事件队列定义（声明见 app_menu.h） */
 QueueHandle_t g_menuEvtQueue = NULL;
  
@@ -95,14 +95,9 @@ static void start_task(void *pvParameters)
         LOG_ERROR("[INIT] motor odom queue create failed!\r\n");
     }
 
-    g_imuDataQueue = xQueueCreate(IMU_DATA_QUEUE_LEN, sizeof(IMU_Data_t));
-    if (g_imuDataQueue == NULL) {
-        LOG_ERROR("[INIT] IMU data queue create failed!\r\n");
-    }
-
-    g_insPoseQueue = xQueueCreate(INS_POSE_QUEUE_LEN, sizeof(INS_Pose_t));
-    if (g_insPoseQueue == NULL) {
-        LOG_ERROR("[INIT] INS pose queue create failed!\r\n");
+    g_insPoseGlobal.lock = xSemaphoreCreateMutex();
+    if (g_insPoseGlobal.lock == NULL) {
+        LOG_ERROR("[INIT] INS pose mutex create failed!\r\n");
     }
 
     g_insCmdQueue = xQueueCreate(INS_CMD_QUEUE_LEN, sizeof(INS_Command_t));
@@ -131,10 +126,10 @@ static void start_task(void *pvParameters)
         "tft_task",
         256,
         NULL,
-        2,
+        1,
         NULL
     );
-    LOG_INFO("  TFT task created (prio=2)\r\n");
+    LOG_INFO("  TFT task created (prio=1)\r\n");
  
     /* 创建 TB6612 电机控制任务 */
     xTaskCreate(
@@ -142,10 +137,10 @@ static void start_task(void *pvParameters)
         "tb6612",
         128,
         NULL,
-        2,
+        3,
         NULL
     );
-    LOG_INFO("  TB6612 task created (prio=2)\r\n");
+    LOG_INFO("  TB6612 task created (prio=3)\r\n");
  
     /* 创建电机编码器采集任务 (每 10ms) */
     xTaskCreate(
@@ -153,10 +148,10 @@ static void start_task(void *pvParameters)
         "motor_enc",
         256,
         NULL,
-        2,
-        NULL
+        3,
+        NULL    
     );
-    LOG_INFO("  Motor encoder task created (prio=2)\r\n");
+    LOG_INFO("  Motor encoder task created (prio=3)\r\n");
 
     /* 创建 IMU 数据采集任务 (ICM-20608 + LIS3MDLRT, 每 100ms) */
     app_imu_start();
@@ -166,13 +161,13 @@ static void start_task(void *pvParameters)
         "ins",
         512,
         NULL,
-        2,
+        4,
         NULL
     );
     if (insCreateOk != pdPASS) {
         LOG_ERROR("[INIT] INS task create failed!\r\n");
     } else {
-        LOG_INFO("  INS task created (prio=2)\r\n");
+        LOG_INFO("  INS task created (prio=4)\r\n");
     }
 
     BaseType_t insCmdCreateOk = xTaskCreate(
@@ -194,13 +189,13 @@ static void start_task(void *pvParameters)
         "motion",
         384,
         NULL,
-        2,
+        3,
         NULL
     );
     if (motionCreateOk != pdPASS) {
         LOG_ERROR("[INIT] motion task create failed!\r\n");
     } else {
-        LOG_INFO("  Motion task created (prio=2)\r\n");
+        LOG_INFO("  Motion task created (prio=3)\r\n");
     }
 
     /* 创建 Flash 开机自检任务 (W25Q64, 最低优先级, 完成后自动删除) */

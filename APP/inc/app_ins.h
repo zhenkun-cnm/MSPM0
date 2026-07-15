@@ -6,14 +6,15 @@
 #define APP_INS_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "FreeRTOS.h"
 #include "queue.h"
+#include "semphr.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define INS_POSE_QUEUE_LEN  1U
 #define INS_CMD_QUEUE_LEN   4U
 
 typedef enum {
@@ -48,8 +49,16 @@ typedef struct {
     uint32_t flags;
 } INS_Pose_t;
 
-extern QueueHandle_t g_insPoseQueue;
+typedef struct {
+    INS_Pose_t pose;
+    SemaphoreHandle_t lock;
+} INS_PoseGlobal_t;
+
+extern INS_PoseGlobal_t g_insPoseGlobal;
 extern QueueHandle_t g_insCmdQueue;
+
+bool INS_Pose_Read(INS_Pose_t *out);
+void INS_Pose_Write(const INS_Pose_t *in);
 
 void ins_task(void *pvParameters);
 

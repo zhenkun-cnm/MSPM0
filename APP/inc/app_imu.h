@@ -6,13 +6,12 @@
 #define _APP_IMU_H_
 
 #include "FreeRTOS.h"
-#include "queue.h"
+#include "semphr.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define IMU_DATA_QUEUE_LEN  1U
 
 typedef struct {
     float roll;
@@ -21,7 +20,15 @@ typedef struct {
     char yawSource;
 } IMU_Data_t;
 
-extern QueueHandle_t g_imuDataQueue;
+typedef struct {
+    IMU_Data_t data;
+    SemaphoreHandle_t lock;
+} IMU_DataGlobal_t;
+
+extern IMU_DataGlobal_t g_imuDataGlobal;
+
+bool IMU_Data_Read(IMU_Data_t *out);
+void IMU_Data_Write(const IMU_Data_t *in);
 
 void app_imu_start(void);
 

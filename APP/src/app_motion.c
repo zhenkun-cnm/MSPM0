@@ -102,11 +102,11 @@ static bool pose_ready(const INS_Pose_t *pose)
 
 static bool get_latest_pose(INS_Pose_t *pose)
 {
-    if (pose == NULL || g_insPoseQueue == NULL) {
+    if (pose == NULL) {
         return false;
     }
 
-    return xQueuePeek(g_insPoseQueue, pose, 0) == pdTRUE;
+    return INS_Pose_Read(pose);
 }
 
 static void send_motor_cmd_wait(MotorCmdType type, int16_t val, TickType_t wait_ticks)

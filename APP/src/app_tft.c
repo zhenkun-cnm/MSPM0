@@ -13,6 +13,8 @@
 #include "app_tft.h"
 #include "app_menu.h"
 #include "app_tb6612.h"
+#include "app_motion.h"
+#include "app_ins.h"
 #include "dev_tft.h"
 #include "dev_menu.h"
 #include "dev_encoder.h"
@@ -30,6 +32,7 @@
 static int16_t g_brightness = 50;
 static int16_t g_contrast   = 50;
 static float   g_temp       = 23.5f;
+static float   g_testAuto   = 0.0f;
 
 /* TB6612 motor control runtime variables */
 static int16_t g_motorOn       = 0;
@@ -85,21 +88,56 @@ static const MenuItem motorItems[] = {
 };
 #define MOTOR_ITEM_COUNT  (sizeof(motorItems) / sizeof(motorItems[0]))
 
-static const MenuItem testItems[] = {
-    {"LED Test",    MENU_LEAF,    NULL,        0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Encoder",     MENU_LEAF,    NULL,        0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Button",      MENU_LEAF,    NULL,        0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Motor",       MENU_SUBMENU, motorItems,  MOTOR_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+static const MenuItem straightYawPidItems[] = {
+    {"Kp",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.straight_yaw.kp},       {.f = 0.0f}, {.f = 5.0f},  {.f = 0.05f}},
+    {"Ki",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.straight_yaw.ki},       {.f = 0.0f}, {.f = 1.0f},  {.f = 0.01f}},
+    {"Kd",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.straight_yaw.kd},       {.f = 0.0f}, {.f = 1.0f},  {.f = 0.01f}},
+    {"TrimMax", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.straight_yaw.trim_max}, {.f = 0.0f}, {.f = 40.0f}, {.f = 1.0f}},
 };
+#define STRAIGHT_YAW_PID_ITEM_COUNT  (sizeof(straightYawPidItems) / sizeof(straightYawPidItems[0]))
+
+static const MenuItem turnYawPidItems[] = {
+    {"Kp",       MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.turn_yaw.kp},           {.f = 0.0f}, {.f = 5.0f},  {.f = 0.05f}},
+    {"Ki",       MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.turn_yaw.ki},           {.f = 0.0f}, {.f = 1.0f},  {.f = 0.01f}},
+    {"Kd",       MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.turn_yaw.kd},           {.f = 0.0f}, {.f = 1.0f},  {.f = 0.01f}},
+    {"Deadband", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.turn_yaw.deadband_deg}, {.f = 0.5f}, {.f = 10.0f}, {.f = 0.5f}},
+    {"PwmMin",   MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.turn_yaw.pwm_min},      {.f = 0.0f}, {.f = 40.0f}, {.f = 1.0f}},
+    {"PwmMax",   MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.turn_yaw.pwm_max},      {.f = 5.0f}, {.f = 60.0f}, {.f = 1.0f}},
+};
+#define TURN_YAW_PID_ITEM_COUNT  (sizeof(turnYawPidItems) / sizeof(turnYawPidItems[0]))
+
+static const MenuItem pidItems[] = {
+    {"Straight", MENU_SUBMENU, straightYawPidItems, (uint8_t)STRAIGHT_YAW_PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"TurnYaw",  MENU_SUBMENU, turnYawPidItems,     (uint8_t)TURN_YAW_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+};
+#define PID_ITEM_COUNT  (sizeof(pidItems) / sizeof(pidItems[0]))
+
+static const MenuItem testItems[] = {
+    {"LED Test",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"Encoder",     MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"Button",      MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"Motor",       MENU_SUBMENU, motorItems,  MOTOR_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Display",     MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"IMU View",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"Yaw View",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"Odom View",   MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"Flash View",  MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
+    {"AutoTest",    MENU_VALUE,   NULL,        0, MENU_VAL_FLOAT, {.f = &g_testAuto}, {.f = 0.0f}, {.f = 999.9f}, {.f = 0.1f}},
+};
+#define TEST_AUTO_INDEX  9U
+#define TEST_ITEM_COUNT  (sizeof(testItems) / sizeof(testItems[0]))
 
 static const MenuItem rootItems[] = {
-    {"Test",       MENU_SUBMENU, testItems,    4, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Test",       MENU_SUBMENU, testItems,    (uint8_t)TEST_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"PID",        MENU_SUBMENU, pidItems,     (uint8_t)PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Settings",   MENU_SUBMENU, settingsItems, 4, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Sensors",    MENU_SUBMENU, sensorItems,   2, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"INS View",   MENU_LEAF,    NULL,          0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"About",      MENU_SUBMENU, aboutItems,    3, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 
 #define ROOT_ITEM_COUNT     (sizeof(rootItems) / sizeof(rootItems[0]))
+#define ROOT_INS_VIEW_INDEX 4U
 
 /* ================================================================
  *  Render parameters (1.8" 160x128: 8 rows total, 7 visible + 1 status)
@@ -111,6 +149,7 @@ static const MenuItem rootItems[] = {
 #define MENU_VISIBLE_ROWS   (MENU_MAX_ROWS - 1)
 
 #define KEY_STATUS_Y        (TFT_HEIGHT - MENU_ROW_H)
+#define MENU_REFRESH_MS     200U
 
 /* Scroll offset (module-level, reset on menu layer change via Menu_Enter / Menu_Back) */
 static uint8_t g_scrollOfs = 0;
@@ -130,12 +169,13 @@ static uint8_t decimals_from_step(float step)
 /* ================================================================
  *  Scroll helper: ensure ctx->index is visible
  * ================================================================ */
-static void scroll_update(const MenuCtx *ctx)
+static bool scroll_update(const MenuCtx *ctx)
 {
+    uint8_t oldOfs = g_scrollOfs;
     uint8_t maxVis = MENU_VISIBLE_ROWS;
     if (ctx->count <= maxVis) {
         g_scrollOfs = 0;
-        return;
+        return (oldOfs != g_scrollOfs);
     }
     if (ctx->index >= (uint8_t)(g_scrollOfs + maxVis)) {
         g_scrollOfs = (uint8_t)(ctx->index - maxVis + 1U);
@@ -143,56 +183,99 @@ static void scroll_update(const MenuCtx *ctx)
     if (ctx->index < g_scrollOfs) {
         g_scrollOfs = ctx->index;
     }
+    return (oldOfs != g_scrollOfs);
 }
 
 /* ================================================================
  *  Menu render (with scroll support)
  * ================================================================ */
-static void menu_render(DevTFT *tft, const MenuCtx *ctx)
+static uint8_t menu_visible_rows(const MenuCtx *ctx)
 {
-    tft->fillScreen(tft, TFT_BLACK);
-
-    scroll_update(ctx);
-
     uint8_t maxVis = MENU_VISIBLE_ROWS;
     if (ctx->count < maxVis) maxVis = ctx->count;
+    return maxVis;
+}
 
-    for (uint8_t i = 0; i < maxVis; i++) {
-        uint8_t idx = (uint8_t)(g_scrollOfs + i);
-        if (idx >= ctx->count) break;
-        const MenuItem *it = &ctx->current[idx];
-        bool selected = (idx == ctx->index);
+static bool menu_index_to_screen_row(const MenuCtx *ctx, uint8_t logicalIndex, uint8_t *screenRow)
+{
+    uint8_t maxVis = menu_visible_rows(ctx);
 
-        uint16_t fg = TFT_WHITE;
-        uint16_t bg = TFT_BLACK;
+    if (logicalIndex < g_scrollOfs ||
+        logicalIndex >= (uint8_t)(g_scrollOfs + maxVis) ||
+        logicalIndex >= ctx->count) {
+        return false;
+    }
 
-        if (selected) {
-            if (ctx->editing && it->type == MENU_VALUE) {
-                fg = TFT_WHITE;
-                bg = TFT_ORANGE;
-            } else {
-                fg = TFT_WHITE;
-                bg = TFT_BLUE;
-            }
-        }
+    *screenRow = (uint8_t)(logicalIndex - g_scrollOfs);
+    return true;
+}
 
-        uint16_t y = (uint16_t)(i * MENU_ROW_H);
+static void menu_draw_item_at_row(DevTFT *tft, const MenuCtx *ctx,
+                                  uint8_t logicalIndex, uint8_t screenRow)
+{
+    const MenuItem *it = &ctx->current[logicalIndex];
+    bool selected = (logicalIndex == ctx->index);
+    uint16_t fg = TFT_WHITE;
+    uint16_t bg = TFT_BLACK;
+    uint16_t y = (uint16_t)(screenRow * MENU_ROW_H);
 
-        if (it->type == MENU_VALUE && it->valuePtr.i != NULL) {
-            if (it->valType == MENU_VAL_FLOAT) {
-                uint8_t dec = decimals_from_step(it->valStep.f);
-                tft->printf(tft, 0, y, fg, bg, "%-9s %.*f",
-                            it->title, dec, (double)(*it->valuePtr.f));
-            } else {
-                tft->printf(tft, 0, y, fg, bg, "%-9s %d",
-                            it->title, (int)(*it->valuePtr.i));
-            }
+    if (selected) {
+        if (ctx->editing && it->type == MENU_VALUE) {
+            fg = TFT_WHITE;
+            bg = TFT_ORANGE;
         } else {
-            tft->printString(tft, 0, y, it->title, fg, bg);
+            fg = TFT_WHITE;
+            bg = TFT_BLUE;
         }
     }
 
+    if (it->type == MENU_VALUE && it->valuePtr.i != NULL) {
+        if (it->valType == MENU_VAL_FLOAT) {
+            uint8_t dec = decimals_from_step(it->valStep.f);
+            tft->printf(tft, 0, y, fg, bg, "%-9s %.*f",
+                        it->title, dec, (double)(*it->valuePtr.f));
+        } else {
+            tft->printf(tft, 0, y, fg, bg, "%-9s %d",
+                        it->title, (int)(*it->valuePtr.i));
+        }
+    } else {
+        tft->printString(tft, 0, y, it->title, fg, bg);
+    }
+}
+
+static void menu_render_item_line(DevTFT *tft, const MenuCtx *ctx, uint8_t logicalIndex)
+{
+    uint8_t row;
+
+    if (!menu_index_to_screen_row(ctx, logicalIndex, &row)) {
+        return;
+    }
+
+    tft->fillRect(tft, 0, (uint16_t)(row * MENU_ROW_H), TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+    menu_draw_item_at_row(tft, ctx, logicalIndex, row);
+}
+
+static void menu_render_status(DevTFT *tft)
+{
+    tft->fillRect(tft, 0, KEY_STATUS_Y, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
     tft->printString(tft, 0, KEY_STATUS_Y, g_lastKeyMsg, TFT_GREEN, TFT_BLACK);
+}
+
+static void menu_render_full(DevTFT *tft, const MenuCtx *ctx)
+{
+    uint8_t maxVis;
+
+    tft->fillScreen(tft, TFT_BLACK);
+    (void)scroll_update(ctx);
+
+    maxVis = menu_visible_rows(ctx);
+    for (uint8_t i = 0; i < maxVis; i++) {
+        uint8_t idx = (uint8_t)(g_scrollOfs + i);
+        if (idx >= ctx->count) break;
+        menu_draw_item_at_row(tft, ctx, idx, i);
+    }
+
+    menu_render_status(tft);
 }
 
 /* ================================================================
@@ -268,6 +351,67 @@ static bool handle_quick_leaf(const MenuItem *cur, MenuCtx *ctx)
     return false;
 }
 
+static void auto_test_tick(DevTFT *tft, const MenuCtx *ctx, bool inLeaf)
+{
+    g_testAuto += 0.1f;
+    if (g_testAuto > 999.9f) {
+        g_testAuto = 0.0f;
+    }
+
+    if (!inLeaf && ctx->current == testItems) {
+        menu_render_item_line(tft, ctx, TEST_AUTO_INDEX);
+    }
+}
+
+/* ================================================================
+ *  INS View leaf page (200ms auto-refresh)
+ * ================================================================ */
+static void ins_view_render(DevTFT *tft)
+{
+    static bool firstRender = true;
+    static float prevX = -999.0f, prevY = -999.0f, prevM1 = -999.0f, prevM2 = -999.0f, prevYaw = -999.0f;
+
+    if (firstRender) {
+        tft->fillScreen(tft, TFT_BLACK);
+        tft->printString(tft, 0, 0, "--- INS ---", TFT_YELLOW, TFT_BLACK);
+        tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
+        firstRender = false;
+    }
+
+    INS_Pose_t pose;
+    if (!INS_Pose_Read(&pose)) {
+        if (prevX == -999.0f)
+            tft->printString(tft, 0, 2 * MENU_ROW_H, "Waiting INS...", TFT_RED, TFT_BLACK);
+        return;
+    }
+
+    if (pose.x_m != prevX) {
+        tft->fillRect(tft, 0, MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, MENU_ROW_H, TFT_WHITE, TFT_BLACK, "X: %+.3fm", (double)pose.x_m);
+        prevX = pose.x_m;
+    }
+    if (pose.y_m != prevY) {
+        tft->fillRect(tft, 0, 2 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, 2 * MENU_ROW_H, TFT_WHITE, TFT_BLACK, "Y: %+.3fm", (double)pose.y_m);
+        prevY = pose.y_m;
+    }
+    if (pose.left_m != prevM1) {
+        tft->fillRect(tft, 0, 3 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, 3 * MENU_ROW_H, TFT_WHITE, TFT_BLACK, "M1: %+.3fm", (double)pose.left_m);
+        prevM1 = pose.left_m;
+    }
+    if (pose.right_m != prevM2) {
+        tft->fillRect(tft, 0, 4 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, 4 * MENU_ROW_H, TFT_WHITE, TFT_BLACK, "M2: %+.3fm", (double)pose.right_m);
+        prevM2 = pose.right_m;
+    }
+    if (pose.yaw_deg != prevYaw) {
+        tft->fillRect(tft, 0, 5 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, 5 * MENU_ROW_H, TFT_WHITE, TFT_BLACK, "YAW: %+.2f deg", (double)pose.yaw_deg);
+        prevYaw = pose.yaw_deg;
+    }
+}
+
 /* ================================================================
  *  TFT menu task
  * ================================================================ */
@@ -290,12 +434,17 @@ void tft_task(void *pvParameters)
     g_scrollOfs = 0;
 
     bool inLeaf = false;
-    menu_render(tft, &menuCtx);
+    bool insViewLeaf = false;
+    menu_render_full(tft, &menuCtx);
 
     DevEncoder_Event_t evt;
     while (1)
     {
-        if (xQueueReceive(g_menuEvtQueue, &evt, portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(g_menuEvtQueue, &evt, pdMS_TO_TICKS(MENU_REFRESH_MS)) != pdTRUE) {
+            auto_test_tick(tft, &menuCtx, inLeaf);
+            if (insViewLeaf) {
+                ins_view_render(tft);
+            }
             continue;
         }
 
@@ -303,55 +452,86 @@ void tft_task(void *pvParameters)
             if (evt == ENCODER_EVT_KEY_LONG) {
                 g_lastKeyMsg = "Key:LONG";
                 inLeaf = false;
-                menu_render(tft, &menuCtx);
+                insViewLeaf = false;
+                Menu_Back(&menuCtx);
+                g_scrollOfs = 0;
+                menu_render_full(tft, &menuCtx);
             }
             continue;
         }
 
         switch (evt) {
-            case ENCODER_EVT_CW:
+            case ENCODER_EVT_CW: {
+                uint8_t oldIndex = menuCtx.index;
+                bool wasEditing = menuCtx.editing;
                 Menu_Rotate(&menuCtx, +1);
                 if (is_in_motor_menu(&menuCtx)) {
                     motor_dispatch(&menuCtx, false, 0, NULL);
                 }
-                menu_render(tft, &menuCtx);
+                if (wasEditing) {
+                    menu_render_item_line(tft, &menuCtx, menuCtx.index);
+                } else if (scroll_update(&menuCtx)) {
+                    menu_render_full(tft, &menuCtx);
+                } else {
+                    menu_render_item_line(tft, &menuCtx, oldIndex);
+                    menu_render_item_line(tft, &menuCtx, menuCtx.index);
+                }
                 break;
+            }
 
-            case ENCODER_EVT_CCW:
+            case ENCODER_EVT_CCW: {
+                uint8_t oldIndex = menuCtx.index;
+                bool wasEditing = menuCtx.editing;
                 Menu_Rotate(&menuCtx, -1);
                 if (is_in_motor_menu(&menuCtx)) {
                     motor_dispatch(&menuCtx, false, 0, NULL);
                 }
-                menu_render(tft, &menuCtx);
+                if (wasEditing) {
+                    menu_render_item_line(tft, &menuCtx, menuCtx.index);
+                } else if (scroll_update(&menuCtx)) {
+                    menu_render_full(tft, &menuCtx);
+                } else {
+                    menu_render_item_line(tft, &menuCtx, oldIndex);
+                    menu_render_item_line(tft, &menuCtx, menuCtx.index);
+                }
                 break;
+            }
 
             case ENCODER_EVT_KEY_SHORT:
                 g_lastKeyMsg = "Key:SHORT";
+                menu_render_status(tft);
                 if (Menu_Enter(&menuCtx)) {
                     const MenuItem *cur = Menu_Current(&menuCtx);
                     if (handle_quick_leaf(cur, &menuCtx)) {
-                        menu_render(tft, &menuCtx);
+                        menu_render_full(tft, &menuCtx);
                     } else {
                         inLeaf = true;
-                        leaf_render(tft, cur);
+                        if (cur == &rootItems[ROOT_INS_VIEW_INDEX]) {
+                            insViewLeaf = true;
+                            ins_view_render(tft);
+                        } else {
+                            leaf_render(tft, cur);
+                        }
                     }
                 } else {
                     g_scrollOfs = 0;
-                    menu_render(tft, &menuCtx);
+                    menu_render_full(tft, &menuCtx);
                 }
                 break;
 
             case ENCODER_EVT_KEY_LONG:
                 g_lastKeyMsg = "Key:LONG";
+                menu_render_status(tft);
                 Menu_Back(&menuCtx);
                 g_scrollOfs = 0;
-                menu_render(tft, &menuCtx);
+                menu_render_full(tft, &menuCtx);
                 break;
 
             case ENCODER_EVT_KEY_DOUBLE:
                 g_lastKeyMsg = "Key:DOUBLE";
                 Menu_ToggleEdit(&menuCtx);
-                menu_render(tft, &menuCtx);
+                menu_render_item_line(tft, &menuCtx, menuCtx.index);
+                menu_render_status(tft);
                 break;
 
             default:

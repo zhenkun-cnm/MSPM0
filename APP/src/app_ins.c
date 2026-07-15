@@ -9,13 +9,31 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "semphr.h"
 #include "port_log.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-QueueHandle_t g_insPoseQueue = NULL;
+INS_PoseGlobal_t g_insPoseGlobal = {{{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U}}, NULL};
 QueueHandle_t g_insCmdQueue = NULL;
+
+bool INS_Pose_Read(INS_Pose_t *out)
+{
+    if (out == NULL || g_insPoseGlobal.lock == NULL) return false;
+    if (xSemaphoreTake(g_insPoseGlobal.lock, pdMS_TO_TICKS(1)) != pdTRUE) return false;
+    *out = g_insPoseGlobal.pose;
+    xSemaphoreGive(g_insPoseGlobal.lock);
+    return true;
+}
+
+void INS_Pose_Write(const INS_Pose_t *in)
+{
+    if (in == NULL || g_insPoseGlobal.lock == NULL) return;
+    if (xSemaphoreTake(g_insPoseGlobal.lock, pdMS_TO_TICKS(2)) != pdTRUE) return;
+    g_insPoseGlobal.pose = *in;
+    xSemaphoreGive(g_insPoseGlobal.lock);
+}
 
 #define INS_TASK_PERIOD_MS             10U
 #define INS_PRINT_PERIOD_MS            100U
@@ -406,8 +424,7 @@ void ins_task(void *pvParameters)
             }
 
             imuValid = false;
-            if (g_imuDataQueue != NULL &&
-                xQueuePeek(g_imuDataQueue, &imu, 0) == pdTRUE) {
+            if (IMU_Data_Read(&imu)) {
                 latestRawYaw = imu.yaw;
                 latestRawYawValid = true;
                 yawSource = imu.yawSource;
@@ -461,8 +478,7 @@ void ins_task(void *pvParameters)
         {
             IMU_Data_t imu;
             imuValid = false;
-            if (g_imuDataQueue != NULL &&
-                xQueuePeek(g_imuDataQueue, &imu, 0) == pdTRUE) {
+            if (IMU_Data_Read(&imu)) {
                 latestRawYaw = imu.yaw;
                 latestRawYawValid = true;
                 yawSource = imu.yawSource;
@@ -498,9 +514,7 @@ void ins_task(void *pvParameters)
                         latestRawYawValid, &prevYaw, &havePrevYaw,
                         &logAccumLeft, &logAccumRight, yawSource);
 
-        if (g_insPoseQueue != NULL) {
-            xQueueOverwrite(g_insPoseQueue, &pose);
-        }
+        INS_Pose_Write(&pose);
 
         if ((xTaskGetTickCount() - lastPrint) >= pdMS_TO_TICKS(INS_PRINT_PERIOD_MS)) {
             lastPrint = xTaskGetTickCount();

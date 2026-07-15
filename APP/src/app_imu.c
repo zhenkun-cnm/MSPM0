@@ -10,11 +10,11 @@
 #include "port_log.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "queue.h"
+#include "semphr.h"
 #include <math.h>
 
 #define IMU_TASK_STACK_SIZE      768
-#define IMU_TASK_PRIORITY        (tskIDLE_PRIORITY + 1)
+#define IMU_TASK_PRIORITY        (4)
 #define IMU_TASK_PERIOD_MS       10
 #define IMU_PRINT_PERIOD_MS      1000
 
@@ -35,7 +35,24 @@
 #define MAG2D_GATE_HIGH          1.45f
 #define MAG2D_MAX_TILT_DEG       25.0f
 
-QueueHandle_t g_imuDataQueue = NULL;
+IMU_DataGlobal_t g_imuDataGlobal = {{0.0f, 0.0f, 0.0f, 'G'}, NULL};
+
+bool IMU_Data_Read(IMU_Data_t *out)
+{
+    if (out == NULL || g_imuDataGlobal.lock == NULL) return false;
+    if (xSemaphoreTake(g_imuDataGlobal.lock, pdMS_TO_TICKS(1)) != pdTRUE) return false;
+    *out = g_imuDataGlobal.data;
+    xSemaphoreGive(g_imuDataGlobal.lock);
+    return true;
+}
+
+void IMU_Data_Write(const IMU_Data_t *in)
+{
+    if (in == NULL || g_imuDataGlobal.lock == NULL) return;
+    if (xSemaphoreTake(g_imuDataGlobal.lock, pdMS_TO_TICKS(2)) != pdTRUE) return;
+    g_imuDataGlobal.data = *in;
+    xSemaphoreGive(g_imuDataGlobal.lock);
+}
 
 typedef struct {
     float gx;
@@ -279,9 +296,7 @@ static void imu_task(void *arg)
             IMU_Data_t data;
             ahrs9_get_euler(&data.roll, &data.pitch, &data.yaw);
             data.yawSource = magUsed ? 'M' : (stillLock ? 'B' : 'G');
-            if (g_imuDataQueue != NULL) {
-                xQueueOverwrite(g_imuDataQueue, &data);
-            }
+            IMU_Data_Write(&data);
         }
 
         if ((xTaskGetTickCount() - lastPrint) >= pdMS_TO_TICKS(IMU_PRINT_PERIOD_MS)) {
@@ -301,6 +316,11 @@ static void imu_task(void *arg)
 
 void app_imu_start(void)
 {
+    g_imuDataGlobal.lock = xSemaphoreCreateMutex();
+    if (g_imuDataGlobal.lock == NULL) {
+        LOG_RAW("[ATT] IMU mutex create failed\r\n");
+        return;
+    }
     xTaskCreate(imu_task, "imu_task",
                 IMU_TASK_STACK_SIZE, NULL,
                 IMU_TASK_PRIORITY, NULL);

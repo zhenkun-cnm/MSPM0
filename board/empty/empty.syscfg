@@ -51,9 +51,9 @@ mux8.inputSelect = "HSCLKMUX_SYSPLL2X";
 const mux12       = system.clockTree["SYSPLLMUX"];
 mux12.inputSelect = "zSYSPLLMUX_HFCLK";
 
-const pinFunction4     = system.clockTree["HFXT"];
-pinFunction4.inputFreq = 40;
-pinFunction4.enable    = true;
+const pinFunction4       = system.clockTree["HFXT"];
+pinFunction4.inputFreq   = 40;
+pinFunction4.enable      = true;
 pinFunction4.HFXTStartup = 10;
 
 CAPTURE1.$name                              = "TB6612_ENB";
@@ -214,7 +214,6 @@ SPI1.peripheral.misoPin.$assign         = "PB7";
 
 SYSCTL.forceDefaultClkConfig = true;
 SYSCTL.clockTreeEn           = true;
-SYSCTL.HFXTStartup           = 10;
 
 SYSTICK.periodEnable      = true;
 SYSTICK.interruptEnable   = true;
@@ -224,6 +223,7 @@ SYSTICK.systickEnable     = true;
 
 UART1.$name                            = "sys_uart";
 UART1.targetBaudRate                   = 115200;
+UART1.enabledInterrupts                = ["RX"];
 UART1.peripheral.rxPin.$assign         = "PA11";
 UART1.peripheral.txPin.$assign         = "PA10";
 UART1.txPinConfig.direction            = scripting.forceWrite("OUTPUT");

@@ -12,6 +12,9 @@
 #include "app_tb6612.h"
 #include "app_imu.h"
 #include "app_motor_encoder.h"
+#include "app_ins.h"
+#include "app_ins_cmd.h"
+#include "app_motion.h"
 #include "dev_led.h"
 #include "dev_encoder.h"
 #include "port_log.h"
@@ -22,7 +25,7 @@
 #include "task.h"
 #include "queue.h"
 #include <stdio.h>
- 
+ #include "freertosconfig.h"
 /* 编码器→菜单事件队列定义（声明见 app_menu.h） */
 QueueHandle_t g_menuEvtQueue = NULL;
  
@@ -33,6 +36,9 @@ extern void flash_init_task(void *pvParameters);
 extern void tft_task(void *pvParameters);
 extern void tb6612_task(void *pvParameters);
 extern void motor_encoder_task(void *pvParameters);
+extern void ins_task(void *pvParameters);
+extern void ins_cmd_task(void *pvParameters);
+extern void motion_task(void *pvParameters);
  
 /* 任务句柄 */
 static TaskHandle_t s_startTaskHandle;
@@ -88,12 +94,32 @@ static void start_task(void *pvParameters)
     if (g_motorOdomQueue == NULL) {
         LOG_ERROR("[INIT] motor odom queue create failed!\r\n");
     }
+
+    g_imuDataQueue = xQueueCreate(IMU_DATA_QUEUE_LEN, sizeof(IMU_Data_t));
+    if (g_imuDataQueue == NULL) {
+        LOG_ERROR("[INIT] IMU data queue create failed!\r\n");
+    }
+
+    g_insPoseQueue = xQueueCreate(INS_POSE_QUEUE_LEN, sizeof(INS_Pose_t));
+    if (g_insPoseQueue == NULL) {
+        LOG_ERROR("[INIT] INS pose queue create failed!\r\n");
+    }
+
+    g_insCmdQueue = xQueueCreate(INS_CMD_QUEUE_LEN, sizeof(INS_Command_t));
+    if (g_insCmdQueue == NULL) {
+        LOG_ERROR("[INIT] INS cmd queue create failed!\r\n");
+    }
+
+    g_motionCmdQueue = xQueueCreate(MOTION_CMD_QUEUE_LEN, sizeof(Motion_Command_t));
+    if (g_motionCmdQueue == NULL) {
+        LOG_ERROR("[INIT] motion cmd queue create failed!\r\n");
+    }
  
     /* 创建编码器应用任务（内部包含 5ms 周期轮询） */
     xTaskCreate(
         encoder_task,
         "encoder_task",
-        256,
+        128,
         NULL,
         2,
         &s_encoderTaskHandle
@@ -103,7 +129,7 @@ static void start_task(void *pvParameters)
     xTaskCreate(
         tft_task,
         "tft_task",
-        512,
+        256,
         NULL,
         2,
         NULL
@@ -114,7 +140,7 @@ static void start_task(void *pvParameters)
     xTaskCreate(
         tb6612_task,
         "tb6612",
-        256,
+        128,
         NULL,
         2,
         NULL
@@ -134,6 +160,48 @@ static void start_task(void *pvParameters)
 
     /* 创建 IMU 数据采集任务 (ICM-20608 + LIS3MDLRT, 每 100ms) */
     app_imu_start();
+
+    BaseType_t insCreateOk = xTaskCreate(
+        ins_task,
+        "ins",
+        512,
+        NULL,
+        2,
+        NULL
+    );
+    if (insCreateOk != pdPASS) {
+        LOG_ERROR("[INIT] INS task create failed!\r\n");
+    } else {
+        LOG_INFO("  INS task created (prio=2)\r\n");
+    }
+
+    BaseType_t insCmdCreateOk = xTaskCreate(
+        ins_cmd_task,
+        "ins_cmd",
+        256,
+        NULL,
+        1,
+        NULL
+    );
+    if (insCmdCreateOk != pdPASS) {
+        LOG_ERROR("[INIT] INS cmd task create failed!\r\n");
+    } else {
+        LOG_INFO("  INS cmd task created (prio=1)\r\n");
+    }
+
+    BaseType_t motionCreateOk = xTaskCreate(
+        motion_task,
+        "motion",
+        384,
+        NULL,
+        2,
+        NULL
+    );
+    if (motionCreateOk != pdPASS) {
+        LOG_ERROR("[INIT] motion task create failed!\r\n");
+    } else {
+        LOG_INFO("  Motion task created (prio=2)\r\n");
+    }
 
     /* 创建 Flash 开机自检任务 (W25Q64, 最低优先级, 完成后自动删除) */
     xTaskCreate(

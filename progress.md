@@ -155,3 +155,22 @@ if (ret == pdPASS) {
 
 #### 下一步
 -
+
+---
+
+## 会话 12 - 程序丢失后恢复工程编译与启动流程
+
+**日期:** 2026-07-15
+
+### 已完成
+- [x] 恢复 `app_init.c` 中 INS/motion 相关 include、队列创建和任务启动。
+- [x] 恢复 `g_imuDataQueue / g_insPoseQueue / g_insCmdQueue / g_motionCmdQueue` 创建。
+- [x] 恢复 `ins_task / ins_cmd_task / motion_task` 启动。
+- [x] Keil `.uvprojx` 重新加入 `app_ins.c / app_ins_cmd.c / app_motion.c / port_uart_rx.c`。
+- [x] Keil `.uvoptx` 同步补充文件状态，避免 GUI 状态漏文件。
+- [x] 暂时撤出 `app_stack_monitor.c`，因为当前 FreeRTOS 配置不支持它使用的 `xTaskGetHandle()`，且它不是 INS/motion 核心功能。
+
+### 编译结果
+- [x] Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。
+- [x] build.log 确认 `app_ins.c / app_ins_cmd.c / app_motion.c / port_uart_rx.c` 均参与编译。
+- [x] 唯一 warning 仍为既有 `LED_PORT` macro redefined。

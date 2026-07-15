@@ -514,6 +514,21 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_motor_encoder.c</FilePath>
             </File>
+            <File>
+              <FileName>app_ins.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_ins.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ins_cmd.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_ins_cmd.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_motion.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_motion.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -593,6 +608,11 @@
               <FileName>port_lis3mdl.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\port\src\port_lis3mdl.c</FilePath>
+            </File>
+            <File>
+              <FileName>port_uart_rx.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_uart_rx.c</FilePath>
             </File>
           </Files>
         </Group>

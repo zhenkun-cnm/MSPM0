@@ -37,7 +37,7 @@
 #define configSUPPORT_STATIC_ALLOCATION         0       // 关闭静态分配（省事）
 
 // 关键：给 FreeRTOS 堆分配的空间（字节）。MSPM0G3507 有 32KB SRAM，这里给系统分配 12KB
-#define configTOTAL_HEAP_SIZE                   ( ( size_t ) ( 16 * 1024 ) ) 
+#define configTOTAL_HEAP_SIZE                   ( ( size_t ) ( 18 * 1024 ) ) 
 
 /*-----------------------------------------------------------
  * 钩子函数配置（通常设为0，省去手写空函数的麻烦）

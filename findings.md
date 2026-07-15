@@ -121,3 +121,12 @@ start_task:
 | LSF0108 电平转换 | 中 | RC 边沿限制 SPI 频率上限 ~400kHz |
 | 堆栈溢出 | 低 | 需实测确认各任务栈使用量 |
 | Flash 写磨损 | 低 | 当前仅有验证测试，无频繁写入 |
+
+---
+
+## 2026-07-15 程序恢复发现
+
+- 本次丢失主要表现为 Keil 工程编译项回退：`app_ins.c`、`app_ins_cmd.c`、`app_motion.c`、`port_uart_rx.c` 没有进入 `.uvprojx` 编译列表。
+- `app_init.c` 也回退到旧状态，缺少 IMU/INS/motion 队列创建和任务启动，已恢复。
+- `app_stack_monitor.c` 使用 `xTaskGetHandle()`，当前 FreeRTOS 配置不声明该 API，会导致编译错误；已暂时撤出构建和启动。
+- 恢复后 clean rebuild 通过，说明 INS、串口命令、motion、TFT PID 菜单和 UART RX port 已重新进入固件。

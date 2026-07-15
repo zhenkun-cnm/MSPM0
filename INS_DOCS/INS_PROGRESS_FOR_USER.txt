@@ -1,0 +1,128 @@
+INS 给你看的当前进度
+更新时间：2026-07-15
+
+问：现在代码补齐到哪里了？
+答：已经把丢失的 INS 代码补回来了，并且直接加入了串口调试命令。
+
+问：现在默认测试结论是什么？
+答：按你的要求，默认非精准测试数据正常，可以进入下一阶段。当前不再等待精准测试条件。
+
+问：现在串口看什么？
+答：主要看这行：
+
+[INS] X:+... Y:+... YAW:+... V:+... W:+... L:+... R:+... SRC:... F:...
+
+X/Y 是位置，YAW 是方向，V 是速度，W 是角速度，L/R 是左右轮累计距离。
+
+问：我能发哪些命令？
+答：
+
+ins help
+ins status
+ins reset
+ins log on
+ins log off
+ins log print
+
+问：每次测试前怎么做？
+答：
+
+1. 上电。
+2. 等 [INS] Ready。
+3. 输入 ins reset。
+4. 如果要保存日志，输入 ins log on。
+5. 开始推车或跑车。
+6. 结束后输入 ins log off。
+
+问：Flash 存什么？
+答：存 INS 位姿日志，不存完整原始 IMU 波形。每条记录包括开机后毫秒时间戳、X/Y、Yaw、速度、角速度、左右轮增量、yaw 来源。
+
+问：这个时间戳是什么意思？
+答：时间戳叫 boot_ms，意思是“小车从开机运行到这条日志时经过了多少毫秒”。它不是年月日时分秒，因为当前没有接入 RTC 实时时钟，也没有上位机校时。
+
+问：什么时候存 Flash？
+答：默认不存。只有你输入 ins log on 后才开始存，每 200ms 存一条。输入 ins log off 后停止。
+
+问：Flash 里存了但我怎么看？
+答：输入：
+
+ins log print
+
+它会把 Flash 里的 INS 日志从串口打印出来，每行以 [INS_LOG] 开头。如果没有记录，会显示 [INS_LOG] empty。
+
+打印出来的 boot_ms 会随着日志递增，正常情况下每条大约增加 200ms。
+
+问：这次有没有改标定参数？
+答：没有。仍然是轮径 48mm、轮距 125mm、M1=1054、M2=985。
+
+问：Keil 编译结果？
+答：新增 ins log print 和 boot_ms 打印后，clean rebuild 已通过：0 Error(s), 1 Warning(s)。warning 是原来的 LED_PORT 宏重定义，不是 INS 新增错误。
+
+【2026-07-15 更新：基础运动控制】
+问：现在下一步做了什么？
+答：已经新增基础运动控制 app_motion。现在小车不只是打印 INS 位姿，还可以通过串口命令尝试自动直行指定距离、单轮定轴转指定角度。
+
+问：我能发哪些 motion 命令？
+答：
+motion help
+motion status
+motion stop
+motion fwd 0.3
+motion back 0.3
+motion turn 45
+motion turn -90
+
+问：转向规则是什么？
+答：motion turn 后面的角度不是只能 90。范围是 -180 到 +180。正数左转，左轮不动、右轮动；负数右转，右轮不动、左轮动。
+
+问：使用前要注意什么？
+答：必须先等 [INS] Ready。建议先发送 ins reset，再测试 motion fwd 0.3 或 motion turn -45。motion stop 可以随时停车。
+
+问：现在是不是精准导航？
+答：还不是。现在是非精准测试条件下的第一版基础动作闭环，用来确认“能按 INS 自动停、方向正确、单轮转向逻辑正确”。后续再根据实车表现调速度、误差阈值和标定参数。
+
+问：这次编译过了吗？
+答：Keil clean rebuild 已经通过，结果是 0 Error(s), 1 Warning(s)。这个 Warning 仍然是原来的 LED_PORT 宏重定义，不是 motion 新代码导致的错误。map 文件也确认 motion_task 已经被链接进固件。
+
+【2026-07-15 修复】
+问：刚才两个 undefined 报错是什么原因？
+答：app_init.c 已经调用了 motion_task，并创建 g_motionCmdQueue，但是 Keil 工程主文件里 app_motion.c 被漏掉/覆盖掉了，所以链接器找不到这两个符号。
+
+问：现在怎么修的？
+答：已经把 APP/src/app_motion.c 重新加入 Keil 工程 App/Src 组，并同步补了 uvoptx 文件状态。
+
+问：现在编译结果？
+答：clean rebuild 已确认出现 compiling app_motion.c，最终 0 Error(s), 1 Warning(s)。这个 warning 仍是原来的 LED_PORT 宏重定义。
+
+【2026-07-15 更新：Motion PID 菜单】
+问：现在菜单能调什么？
+答：TFT 菜单新增 PID 项，可以调 Straight 直行 yaw 环和 TurnYaw 转向角度保持环。
+
+菜单路径：
+PID -> Straight -> Kp / Ki / Kd / TrimMax
+PID -> TurnYaw -> Kp / Ki / Kd / Deadband / PwmMin / PwmMax
+
+问：这些参数会保存到 Flash 吗？
+答：暂时不会。现在只是运行时调参，断电后恢复默认值，避免影响 W25Q64 的 INS 日志区。
+
+问：左右轮脉冲不同怎么处理？
+答：已经明确记录：M1 左轮是 1054 counts/rev，M2 右轮是 985 counts/rev。相同真实轮速下，左右原始脉冲本来就不一样，所以不能用“左右脉冲相等”判断同速。后续如果做轮速环，必须先换算成米每秒再比较。
+
+问：转向 90 度过冲怎么办？
+答：转向已改成 yaw 目标闭环保持。到目标死区内会刹车保持；如果过冲，比如 -90 变 -110，会允许反向微调拉回目标附近。
+
+问：到目标角度后还能继续发命令吗？
+答：可以。新的 motion turn 可以更新目标角度；如果已经进入目标死区保持状态，motion fwd/back 也可以接管继续直行。
+
+问：这次编译结果？
+答：Keil clean rebuild 通过，日志确认 app_tft.c 和 app_motion.c 都参与编译，最终 0 Error(s), 1 Warning(s)。这个 warning 仍是原来的 LED_PORT 宏重定义。
+
+【2026-07-15 恢复记录】
+问：这次程序丢失后恢复了什么？
+答：已恢复 Keil 工程编译项和 app_init 启动流程。现在 INS、串口命令、motion 控制、TFT PID 菜单、UART RX port 都重新进入工程并参与编译。
+
+问：为什么暂时没有恢复 stack monitor？
+答：stack monitor 不是惯导核心功能，而且当前 FreeRTOS 配置下它使用的 xTaskGetHandle 不可用，会导致编译错误。为保证 INS/motion 主功能可用，已先撤出 stack monitor。
+
+问：现在编译结果？
+答：Keil clean rebuild 已通过：0 Error(s), 1 Warning(s)。唯一 warning 仍是原来的 LED_PORT 宏重定义。

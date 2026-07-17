@@ -429,16 +429,16 @@ static void test1_update(Test1_Runtime_t *rt)
             turn_delta = test1_wrap_180(rt->target_heading_deg - pose.yaw_deg);
             rt->yaw_error_deg = turn_delta;
 
-            if (fabsf(turn_delta) <= TEST1_YAW_TOL_DEG) {
-                log_printf_internal("[TEST1_STEP] heading ok, enter DRIVE point=%u/%u\r\n",
-                                    (unsigned)(rt->point_index + 1U),
-                                    TEST1_POINT_COUNT);
-                rt->state = TEST1_STATE_DRIVE_TO_TARGET;
-                test1_reset_motion_wait(rt);
-                break;
-            }
-
             if (!rt->motion_cmd_sent) {
+                if (fabsf(turn_delta) <= TEST1_YAW_TOL_DEG) {
+                    log_printf_internal("[TEST1_STEP] heading ok, enter DRIVE point=%u/%u\r\n",
+                                        (unsigned)(rt->point_index + 1U),
+                                        TEST1_POINT_COUNT);
+                    rt->state = TEST1_STATE_DRIVE_TO_TARGET;
+                    test1_reset_motion_wait(rt);
+                    break;
+                }
+
                 LOG_RAW("[TEST1] turn_to_target delta=%+.1f target_heading=%+.1f\r\n",
                         turn_delta,
                         rt->target_heading_deg);

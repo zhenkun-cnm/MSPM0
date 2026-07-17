@@ -51,3 +51,29 @@
 | 错误 | 尝试次数 | 解决方案 |
 |------|---------|---------|
 | 无 | 0 | - |
+## 2026-07-17 - Current task: NAV v1
+
+Status: implemented and build-verified.
+
+Completed:
+- Added `app_nav` files and task.
+- Added `g_navCmdQueue`.
+- Added UART commands: `nav help`, `nav status`, `nav stop`, `nav goto`, `nav square`.
+- Registered `app_nav.c` in Keil `.uvprojx`.
+
+Next tests:
+- `ins reset`
+- `nav goto 0.5 0.0 0`
+- `ins reset`
+- `nav goto 0.0 -0.5 -90`
+- `ins reset`
+- `nav square 0.6`
+## 2026-07-17 - NAV square fix
+
+Status: implemented and build-verified.
+
+Test next:
+- `ins reset`
+- `nav square 0.6`
+- Confirm logs show four drive steps and four turn steps.
+- Use `nav status` / `motion status` if any step is rejected or does not start.

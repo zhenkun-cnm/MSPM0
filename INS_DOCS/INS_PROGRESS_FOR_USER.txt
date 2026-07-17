@@ -126,3 +126,63 @@ PID -> TurnYaw -> Kp / Ki / Kd / Deadband / PwmMin / PwmMax
 
 问：现在编译结果？
 答：Keil clean rebuild 已通过：0 Error(s), 1 Warning(s)。唯一 warning 仍是原来的 LED_PORT 宏重定义。
+2026-07-17 - 导航层 v1 已加入
+
+现在做到哪一步？
+答：已经从“单个动作闭环”进入“导航层 v1”。小车现在不仅能执行 motion fwd / motion turn，还新增了 nav goto 和 nav square，用 INS 位姿把多个动作串起来。
+
+导航层 v1 怎么工作？
+答：它不做复杂圆弧。它先根据当前位置和目标点算出目标方向，然后执行三步：
+1. 先转向对准目标点。
+2. 再直行到目标点。
+3. 最后转到你要求的最终 yaw。
+
+新增串口命令是什么？
+答：
+nav help
+nav status
+nav stop
+nav goto <x_m> <y_m> <yaw_deg>
+nav square <side_m>
+
+怎么测试？
+答：建议先从非精准测试继续：
+ins reset
+nav goto 0.5 0.0 0
+
+然后再测：
+ins reset
+nav goto 0.0 -0.5 -90
+
+最后测正方形：
+ins reset
+nav square 0.6
+
+Flash 需要改吗？
+答：不需要。导航层 v1 继续复用 INS Flash 日志，记录 boot_ms / X / Y / YAW / V / W 等位姿数据，不新增 Flash 区。
+
+目前不要急着做什么？
+答：先不要做圆弧、避障、复杂路径平滑。当前最重要的是确认“转向到目标、直行到目标、最终转向”这套导航链路能跑通。
+2026-07-17 - 修复 nav square 只走一条直线
+
+这次修了什么？
+答：`nav square 0.6` 不再按理想正方形四个顶点计算，而是改成明确动作序列：
+前进 0.6m -> 左转 90度 -> 前进 0.6m -> 左转 90度 -> 前进 0.6m -> 左转 90度 -> 前进 0.6m -> 左转 90度。
+
+为什么要这样改？
+答：你的小车是后轮双电机、前轮万向轮，而且转向要求是单轮定轴转向。单轮转向时车的 X/Y 会变化，所以不能假设“转向只改变 yaw”。如果继续用理想顶点，会导致导航层对位置判断不符合真实车体运动。
+
+为什么之前可能只走一条直线？
+答：nav 和 motion 之间没有明确的命令回执。旧逻辑只看 motion 是否为 IDLE，可能把“转向命令没有真正启动”误判成“转向已经完成”。现在每个 motion 命令都有 cmd_id，nav 必须看到同一个 cmd_id 被接受并完成，才进入下一步。
+
+测试时应该看到什么？
+答：发送：
+ins reset
+nav square 0.6
+
+串口应看到：
+[NAV] square drive 1/4 dist=0.600
+[NAV] square turn 1/4 yaw_delta=+90.0
+[NAV] square drive 2/4 dist=0.600
+[NAV] square turn 2/4 yaw_delta=+90.0
+一直到 4/4 完成。

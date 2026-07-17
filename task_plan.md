@@ -147,3 +147,37 @@
 1. 在 Keil 工程中添加 port_tft.c / app_tft.c 编译项
 2. 在 app_init.c 中引入并创建 tft_task
 3. 确认编译通过并烧录测试
+## 2026-07-17 - Current task: NAV v1
+
+Status: implemented and build-verified.
+
+Completed:
+- Add `APP/inc/app_nav.h` and `APP/src/app_nav.c`.
+- Add `g_navCmdQueue`, `nav_task`, and Keil project registration.
+- Add UART commands for `nav help/status/stop/goto/square`.
+- Use INS pose plus motion primitives for point navigation.
+- Reuse INS Flash logging for navigation replay.
+
+Next validation:
+- `ins reset`
+- `nav goto 0.5 0.0 0`
+- `ins reset`
+- `nav goto 0.0 -0.5 -90`
+- `ins reset`
+- `nav square 0.6`
+
+Do not start arcs or obstacle avoidance until NAV v1 point/square tests are observed on the car.
+## 2026-07-17 - NAV square fix
+
+Status: implemented and build-verified.
+
+Completed:
+- Motion command/result handshake with `cmd_id`.
+- NAV waits for exact accepted/done command instead of only checking IDLE.
+- `nav square` now runs 4 forward legs and 4 left turns.
+
+Next validation:
+- `ins reset`
+- `nav square 0.6`
+- Confirm serial logs show `square drive 1/4`, `square turn 1/4`, through `square turn 4/4`.
+- If a step fails, use `nav status` and `motion status` to inspect `wait/active/done/rejected/result`.

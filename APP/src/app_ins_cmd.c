@@ -5,6 +5,7 @@
 #include "app_ins_cmd.h"
 #include "app_ins.h"
 #include "app_motion.h"
+#include "app_nav.h"
 #include "dev_uart_rx.h"
 #include "port_log.h"
 #include "FreeRTOS.h"
@@ -15,7 +16,7 @@
 #include <string.h>
 
 #define INS_CMD_TASK_PERIOD_MS  10U
-#define INS_CMD_LINE_MAX        48U
+#define INS_CMD_LINE_MAX        80U
 
 static bool str_eq(const char *a, const char *b)
 {
@@ -50,6 +51,7 @@ static bool send_motion_cmd(Motion_CommandType_t type, float value)
     Motion_Command_t cmd;
     cmd.type = type;
     cmd.value = value;
+    cmd.cmd_id = 0U;
 
     if (g_motionCmdQueue == NULL) {
         LOG_RAW("[MOTION_CMD] error: queue not ready\r\n");
@@ -58,6 +60,25 @@ static bool send_motion_cmd(Motion_CommandType_t type, float value)
 
     if (xQueueSend(g_motionCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
         LOG_RAW("[MOTION_CMD] error: queue full\r\n");
+        return false;
+    }
+
+    return true;
+}
+
+static bool send_nav_cmd(const Nav_Command_t *cmd)
+{
+    if (cmd == NULL) {
+        return false;
+    }
+
+    if (g_navCmdQueue == NULL) {
+        LOG_RAW("[NAV_CMD] error: queue not ready\r\n");
+        return false;
+    }
+
+    if (xQueueSend(g_navCmdQueue, cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
+        LOG_RAW("[NAV_CMD] error: queue full\r\n");
         return false;
     }
 
@@ -80,9 +101,46 @@ static bool parse_float_arg(const char *text, float *value)
     return end != text;
 }
 
+static bool parse_three_float_args(const char *text, float *a, float *b, float *c)
+{
+    char *end = NULL;
+
+    if (text == NULL || a == NULL || b == NULL || c == NULL) {
+        return false;
+    }
+
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *a = strtof(text, &end);
+    if (end == text) {
+        return false;
+    }
+
+    text = end;
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *b = strtof(text, &end);
+    if (end == text) {
+        return false;
+    }
+
+    text = end;
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *c = strtof(text, &end);
+    return end != text;
+}
+
 static void parse_line(char *line)
 {
     float value;
+    float x_m;
+    float y_m;
+    float yaw_deg;
+    Nav_Command_t navCmd;
 
     while (*line == ' ' || *line == '\t') {
         line++;
@@ -124,12 +182,47 @@ static void parse_line(char *line)
         } else {
             LOG_RAW("[MOTION_CMD] error: usage motion turn <-180..180>\r\n");
         }
+    } else if (str_eq(line, "nav help")) {
+        memset(&navCmd, 0, sizeof(navCmd));
+        navCmd.type = NAV_CMD_HELP;
+        (void)send_nav_cmd(&navCmd);
+    } else if (str_eq(line, "nav status")) {
+        memset(&navCmd, 0, sizeof(navCmd));
+        navCmd.type = NAV_CMD_STATUS;
+        (void)send_nav_cmd(&navCmd);
+    } else if (str_eq(line, "nav stop")) {
+        memset(&navCmd, 0, sizeof(navCmd));
+        navCmd.type = NAV_CMD_STOP;
+        (void)send_nav_cmd(&navCmd);
+    } else if (str_prefix(line, "nav goto ")) {
+        if (parse_three_float_args(line + strlen("nav goto "), &x_m, &y_m, &yaw_deg)) {
+            memset(&navCmd, 0, sizeof(navCmd));
+            navCmd.type = NAV_CMD_GOTO;
+            navCmd.x_m = x_m;
+            navCmd.y_m = y_m;
+            navCmd.yaw_deg = yaw_deg;
+            (void)send_nav_cmd(&navCmd);
+        } else {
+            LOG_RAW("[NAV_CMD] error: usage nav goto <x_m> <y_m> <yaw_deg>\r\n");
+        }
+    } else if (str_prefix(line, "nav square ")) {
+        if (parse_float_arg(line + strlen("nav square "), &value)) {
+            memset(&navCmd, 0, sizeof(navCmd));
+            navCmd.type = NAV_CMD_SQUARE;
+            navCmd.side_m = value;
+            (void)send_nav_cmd(&navCmd);
+        } else {
+            LOG_RAW("[NAV_CMD] error: usage nav square <side_m>\r\n");
+        }
     } else if (str_prefix(line, "motion")) {
         LOG_RAW("[MOTION_CMD] unknown: %s\r\n", line);
         LOG_RAW("[MOTION_CMD] try: motion help\r\n");
+    } else if (str_prefix(line, "nav")) {
+        LOG_RAW("[NAV_CMD] unknown: %s\r\n", line);
+        LOG_RAW("[NAV_CMD] try: nav help\r\n");
     } else if (line[0] != '\0') {
         LOG_RAW("[INS_CMD] unknown: %s\r\n", line);
-        LOG_RAW("[INS_CMD] try: ins help or motion help\r\n");
+        LOG_RAW("[INS_CMD] try: ins help, motion help, or nav help\r\n");
     }
 }
 
@@ -149,7 +242,7 @@ void ins_cmd_task(void *pvParameters)
     }
 
     uart->init(uart);
-    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help\r\n");
+    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help / nav help\r\n");
 
     while (1) {
         uint8_t ch;

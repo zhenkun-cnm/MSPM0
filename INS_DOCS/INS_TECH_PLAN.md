@@ -177,3 +177,91 @@ PID
 - 误差进入 `Deadband` 后双轮刹车保持。
 - 若过冲，允许反向微调回目标角度。
 - 单轮转向时静止轮使用 brake，不再使用 coast。
+## 导航层 v1 技术实现 - 2026-07-17
+
+### 模块
+- 新增 `APP/inc/app_nav.h`
+- 新增 `APP/src/app_nav.c`
+- `app_init.c` 创建 `g_navCmdQueue` 并启动 `nav_task`
+- `app_ins_cmd.c` 解析 `nav ...` 串口命令
+- Keil `.uvprojx` 注册 `app_nav.c`
+
+### 状态机
+```text
+NAV_IDLE
+NAV_TURN_TO_TARGET
+NAV_DRIVE_TO_TARGET
+NAV_TURN_TO_FINAL_YAW
+NAV_DONE
+NAV_ERROR
+```
+
+### 控制逻辑
+输入目标为 `x_m / y_m / yaw_deg`。导航层读取 `INS_Pose_t`，计算：
+```text
+dx = target_x - x
+dy = target_y - y
+target_heading = atan2(dy, dx)
+distance = sqrt(dx^2 + dy^2)
+```
+
+然后按三段动作执行：
+```text
+motion turn (target_heading - current_yaw)
+motion fwd distance
+motion turn (target_yaw - current_yaw)
+```
+
+### 第一版阈值
+```text
+position_tolerance = 0.05 m
+yaw_tolerance      = 3 deg
+max_leg_distance   = 5.0 m
+```
+
+### 串口命令
+```text
+nav help
+nav status
+nav stop
+nav goto <x_m> <y_m> <yaw_deg>
+nav square <side_m>
+```
+
+### Flash
+导航层不新增 Flash 区。路径复盘继续依赖 INS 日志：
+```text
+boot_ms, x_mm, y_mm, yaw_cdeg, v_mms, w_cdegps, left_delta, right_delta, yaw_source
+```
+
+### 测试标准
+- `nav goto 0.5 0.0 0`：能前进约 0.5m 并停止。
+- `nav goto 0.0 -0.5 -90`：先右转，再前进，最终 yaw 接近 -90 度。
+- `nav square 0.6`：能走完四边并回到起点附近；非精准阶段目标为回点误差小于约 10cm，yaw 误差小于约 5 度。
+## 2026-07-17 NAV square 修复
+
+### 原因
+旧版 `nav square` 使用理想绝对顶点；但实车采用单轮定轴转向，转向期间 `X/Y` 会变化，因此不应假设转向只改变 `yaw`。
+
+### 修复
+- `Motion_Command_t` 增加 `cmd_id`。
+- `Motion_RuntimeStatus_t` 增加 `active_cmd_id / done_cmd_id / rejected_cmd_id / last_result`。
+- nav 等待 motion 时必须确认同一个 `cmd_id` 被接受并完成。
+- `nav square <side_m>` 改为动作序列：
+```text
+FWD side -> TURN +90
+FWD side -> TURN +90
+FWD side -> TURN +90
+FWD side -> TURN +90
+```
+
+### 串口诊断
+```text
+[NAV] square drive 1/4 dist=0.600
+[NAV] square turn 1/4 yaw_delta=+90.0
+[NAV] error: motion rejected cmd_id=...
+[NAV] error: motion did not start cmd_id=...
+```
+
+### 编译
+Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。剩余 warning 是既有 `LED_PORT` 宏重定义。

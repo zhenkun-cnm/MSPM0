@@ -22,9 +22,21 @@
 /* 全局变量: 每 10ms 脉冲增量 */
 int32_t g_motorPulseCount  = 0;
 int32_t g_motor2PulseCount = 0;
-QueueHandle_t g_motorOdomQueue = NULL;
+static MotorEncoderSnapshot_t s_motorSnapshot = {0};
 
 /* 轮询周期 (ms) */
+
+bool MotorEncoder_ReadSnapshot(MotorEncoderSnapshot_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+
+    taskENTER_CRITICAL();
+    *out = s_motorSnapshot;
+    taskEXIT_CRITICAL();
+    return true;
+}
 
 void motor_encoder_task(void *pvParameters)
 {
@@ -100,16 +112,13 @@ void motor_encoder_task(void *pvParameters)
             g_motor2PulseCount = delta * MOTOR2_ENCODER_SOFTWARE_SCALE;
         }
 
-        if (g_motorOdomQueue != NULL) {
-            MotorOdomDelta_t odom;
-            odom.left_counts = g_motorPulseCount;
-            odom.right_counts = g_motor2PulseCount;
-            odom.tick = xTaskGetTickCount();
-            if (xQueueSend(g_motorOdomQueue, &odom, 0) != pdTRUE) {
-                MotorOdomDelta_t dropped;
-                (void)xQueueReceive(g_motorOdomQueue, &dropped, 0);
-                (void)xQueueSend(g_motorOdomQueue, &odom, 0);
-            }
-        }
+        taskENTER_CRITICAL();
+        s_motorSnapshot.left_delta_counts = g_motorPulseCount;
+        s_motorSnapshot.right_delta_counts = g_motor2PulseCount;
+        s_motorSnapshot.left_total_counts += g_motorPulseCount;
+        s_motorSnapshot.right_total_counts += g_motor2PulseCount;
+        s_motorSnapshot.tick = xTaskGetTickCount();
+        s_motorSnapshot.seq++;
+        taskEXIT_CRITICAL();
     }
 }

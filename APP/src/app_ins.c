@@ -15,7 +15,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-INS_PoseGlobal_t g_insPoseGlobal = {{{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U}}, NULL};
+INS_PoseGlobal_t g_insPoseGlobal = {{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U}, NULL};
 QueueHandle_t g_insCmdQueue = NULL;
 
 bool INS_Pose_Read(INS_Pose_t *out)
@@ -397,6 +397,10 @@ void ins_task(void *pvParameters)
     float latestRawYaw = 0.0f;
     int32_t logAccumLeft = 0;
     int32_t logAccumRight = 0;
+    int64_t prevLeftTotal = 0;
+    int64_t prevRightTotal = 0;
+    uint32_t prevOdomSeq = 0;
+    bool odomRefReady = false;
     char yawSource = 'W';
 
     (void)pvParameters;
@@ -404,7 +408,7 @@ void ins_task(void *pvParameters)
     LOG_INFO("[INS] Init: wheel=48mm base=125mm M1L=1054 M2R=985\r\n");
 
     while (1) {
-        MotorOdomDelta_t odom;
+        MotorEncoderSnapshot_t odom;
         int32_t sumLeftCounts = 0;
         int32_t sumRightCounts = 0;
         int32_t frameCount = 0;
@@ -418,9 +422,11 @@ void ins_task(void *pvParameters)
         if (!insReady) {
             IMU_Data_t imu;
 
-            while (g_motorOdomQueue != NULL &&
-                   xQueueReceive(g_motorOdomQueue, &odom, 0) == pdTRUE) {
-                /* Discard motion before the yaw zero reference is ready. */
+            if (MotorEncoder_ReadSnapshot(&odom)) {
+                prevLeftTotal = odom.left_total_counts;
+                prevRightTotal = odom.right_total_counts;
+                prevOdomSeq = odom.seq;
+                odomRefReady = true;
             }
 
             imuValid = false;
@@ -454,11 +460,20 @@ void ins_task(void *pvParameters)
             continue;
         }
 
-        while (g_motorOdomQueue != NULL &&
-               xQueueReceive(g_motorOdomQueue, &odom, 0) == pdTRUE) {
-            sumLeftCounts += odom.left_counts;
-            sumRightCounts += odom.right_counts;
-            frameCount++;
+        if (MotorEncoder_ReadSnapshot(&odom)) {
+            if (!odomRefReady) {
+                prevLeftTotal = odom.left_total_counts;
+                prevRightTotal = odom.right_total_counts;
+                prevOdomSeq = odom.seq;
+                odomRefReady = true;
+            } else {
+                sumLeftCounts = (int32_t)(odom.left_total_counts - prevLeftTotal);
+                sumRightCounts = (int32_t)(odom.right_total_counts - prevRightTotal);
+                frameCount = (int32_t)(odom.seq - prevOdomSeq);
+                prevLeftTotal = odom.left_total_counts;
+                prevRightTotal = odom.right_total_counts;
+                prevOdomSeq = odom.seq;
+            }
         }
 
         if (frameCount > 0) {

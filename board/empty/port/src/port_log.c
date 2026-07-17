@@ -10,6 +10,9 @@
 #include <ti/driverlib/driverlib.h>
 #include <stdarg.h>
 
+/* 全局 LOG 抑制标志：置 true 后所有 LOG 宏静默 */
+bool g_log_suppress = false;
+
 /* ========== 底层 UART 输出 ========== */
 
 void LOG_OutputChar(char c)
@@ -36,5 +39,15 @@ void log_printf_internal(const char *fmt, ...)
 
     for (char *p = buf; *p != '\0'; p++) {
         LOG_OutputChar(*p);
+    }
+}
+
+/* ========== JustFloat 原始字节块发送 ========== */
+
+void LOG_SendRawBytes(const uint8_t *data, uint16_t len)
+{
+    uint16_t i;
+    for (i = 0; i < len; i++) {
+        DL_UART_Main_transmitDataBlocking(UART0, (uint8_t)data[i]);
     }
 }

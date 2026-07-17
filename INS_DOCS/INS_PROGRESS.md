@@ -139,3 +139,56 @@ motion turn -90
 ### 编译验证
 
 Keil clean rebuild 已通过：`0 Error(s), 1 Warning(s)`。唯一 warning 仍是原有 `LED_PORT` 宏重定义。`map` 文件已确认 `motion_task` 和 `g_motionCmdQueue` 链接进固件。
+## 2026-07-17 导航层 v1
+
+**现在惯导做到哪一步？**  
+已经进入导航层 v1：`app_nav` 会读取 INS 位姿，并通过现有 `motion` 动作完成“转向对准目标 -> 直行到目标 -> 转向到最终角度”。
+
+**新增了什么命令？**  
+- `nav help`
+- `nav status`
+- `nav stop`
+- `nav goto <x_m> <y_m> <yaw_deg>`
+- `nav square <side_m>`
+
+**为什么第一版不用圆弧？**  
+当前最终目标是先让小车能按 INS 位姿到达目标点。分段式导航更容易定位误差来源：转向误差、直行误差、最终角度误差可以分开看。
+
+**下一步怎么测？**  
+先做非精准测试：
+```text
+ins reset
+nav goto 0.5 0.0 0
+ins reset
+nav goto 0.0 -0.5 -90
+ins reset
+nav square 0.6
+```
+
+**Flash 怎么记录？**  
+继续复用 INS 日志，不新增 Flash 区。建议测试时使用：
+```text
+ins reset
+ins log on
+nav square 0.6
+ins log off
+ins log print
+```
+## 2026-07-17 修复 nav square 只走一条直线
+
+**为什么之前可能只走一条直线？**  
+旧的 nav 和 motion 之间没有明确命令回执，nav 可能只看到 motion 是 `IDLE`，就误判下一步动作已经完成。
+
+**这次怎么修？**  
+- motion 命令增加 `cmd_id`。
+- motion 运行状态增加接受、完成、拒绝回执。
+- nav 必须等同一个 `cmd_id` 完成，才能进入下一步。
+- `nav square` 从理想顶点导航改成动作序列：四次直行 + 四次左转 90 度。
+
+**现在怎么判断修好了？**  
+运行：
+```text
+ins reset
+nav square 0.6
+```
+串口应依次看到 `square drive 1/4`、`square turn 1/4`，直到 `square turn 4/4` 和 `square done`。

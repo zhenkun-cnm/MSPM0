@@ -7,9 +7,9 @@
 #ifndef APP_MOTOR_ENCODER_H
 #define APP_MOTOR_ENCODER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "FreeRTOS.h"
-#include "queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,15 +20,17 @@ extern "C" {
 #define MOTOR2_COUNTS_PER_OUTPUT_REV_CAL      (985L)
 #define MOTOR2_ENCODER_SOFTWARE_SCALE         (4L)
 #define MOTOR_ENC_PERIOD_MS                   (10U)
-#define MOTOR_ODOM_QUEUE_LEN                  (16U)
 
 typedef struct {
-    int32_t left_counts;
-    int32_t right_counts;
+    int32_t left_delta_counts;
+    int32_t right_delta_counts;
+    int64_t left_total_counts;
+    int64_t right_total_counts;
     TickType_t tick;
-} MotorOdomDelta_t;
+    uint32_t seq;
+} MotorEncoderSnapshot_t;
 
-extern QueueHandle_t g_motorOdomQueue;
+bool MotorEncoder_ReadSnapshot(MotorEncoderSnapshot_t *out);
 
 /**
  * @brief 电机编码器每 10ms 脉冲增量 (有符号)

@@ -529,6 +529,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_motion.c</FilePath>
             </File>
+            <File>
+              <FileName>app_nav.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_nav.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

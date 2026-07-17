@@ -130,3 +130,14 @@ start_task:
 - `app_init.c` 也回退到旧状态，缺少 IMU/INS/motion 队列创建和任务启动，已恢复。
 - `app_stack_monitor.c` 使用 `xTaskGetHandle()`，当前 FreeRTOS 配置不声明该 API，会导致编译错误；已暂时撤出构建和启动。
 - 恢复后 clean rebuild 通过，说明 INS、串口命令、motion、TFT PID 菜单和 UART RX port 已重新进入固件。
+## 2026-07-17 - NAV v1 findings
+
+- The correct next step after straight PID and turn PID is a navigation layer, not arcs yet. `app_nav` now sequences proven motion primitives using INS pose.
+- First implementation keeps the control problem observable: heading alignment, straight distance, and final yaw are tested separately inside one `nav goto`.
+- `nav square` is a higher-level regression test for accumulated INS and motion error. It reuses INS Flash logs for replay.
+- Current limits are conservative: position tolerance `0.05m`, yaw tolerance `3deg`, maximum single leg `5.0m`.
+## 2026-07-17 - Why `nav square` only drove one line
+
+- The old NAV-to-motion completion check could treat `MOTION_RT_IDLE` as completion even if the next motion command never actually started.
+- Single-wheel turning changes `X/Y`, so square should not be implemented as ideal fixed waypoints for this chassis.
+- The fix is command-level handshake plus square-as-action-sequence: drive, turn, drive, turn.

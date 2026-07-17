@@ -15,6 +15,7 @@
 #include "app_ins.h"
 #include "app_ins_cmd.h"
 #include "app_motion.h"
+#include "app_nav.h"
 #include "dev_led.h"
 #include "dev_encoder.h"
 #include "port_log.h"
@@ -39,6 +40,7 @@ extern void motor_encoder_task(void *pvParameters);
 extern void ins_task(void *pvParameters);
 extern void ins_cmd_task(void *pvParameters);
 extern void motion_task(void *pvParameters);
+extern void nav_task(void *pvParameters);
  
 /* 任务句柄 */
 static TaskHandle_t s_startTaskHandle;
@@ -90,11 +92,6 @@ static void start_task(void *pvParameters)
         LOG_ERROR("[INIT] motor cmd queue create failed!\r\n");
     }
 
-    g_motorOdomQueue = xQueueCreate(MOTOR_ODOM_QUEUE_LEN, sizeof(MotorOdomDelta_t));
-    if (g_motorOdomQueue == NULL) {
-        LOG_ERROR("[INIT] motor odom queue create failed!\r\n");
-    }
-
     g_insPoseGlobal.lock = xSemaphoreCreateMutex();
     if (g_insPoseGlobal.lock == NULL) {
         LOG_ERROR("[INIT] INS pose mutex create failed!\r\n");
@@ -108,6 +105,11 @@ static void start_task(void *pvParameters)
     g_motionCmdQueue = xQueueCreate(MOTION_CMD_QUEUE_LEN, sizeof(Motion_Command_t));
     if (g_motionCmdQueue == NULL) {
         LOG_ERROR("[INIT] motion cmd queue create failed!\r\n");
+    }
+
+    g_navCmdQueue = xQueueCreate(NAV_CMD_QUEUE_LEN, sizeof(Nav_Command_t));
+    if (g_navCmdQueue == NULL) {
+        LOG_ERROR("[INIT] nav cmd queue create failed!\r\n");
     }
  
     /* 创建编码器应用任务（内部包含 5ms 周期轮询） */
@@ -196,6 +198,20 @@ static void start_task(void *pvParameters)
         LOG_ERROR("[INIT] motion task create failed!\r\n");
     } else {
         LOG_INFO("  Motion task created (prio=3)\r\n");
+    }
+
+    BaseType_t navCreateOk = xTaskCreate(
+        nav_task,
+        "nav",
+        384,
+        NULL,
+        2,
+        NULL
+    );
+    if (navCreateOk != pdPASS) {
+        LOG_ERROR("[INIT] nav task create failed!\r\n");
+    } else {
+        LOG_INFO("  NAV task created (prio=2)\r\n");
     }
 
     /* 创建 Flash 开机自检任务 (W25Q64, 最低优先级, 完成后自动删除) */

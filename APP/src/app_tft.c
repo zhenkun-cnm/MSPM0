@@ -106,11 +106,22 @@ static const MenuItem turnYawPidItems[] = {
 };
 #define TURN_YAW_PID_ITEM_COUNT  (sizeof(turnYawPidItems) / sizeof(turnYawPidItems[0]))
 
+static const MenuItem wheelSpeedPidItems[] = {
+    {"Kp",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.wheel_speed.kp},           {.f = 0.0f}, {.f = 200.0f}, {.f = 5.0f}},
+    {"Ki",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.wheel_speed.ki},           {.f = 0.0f}, {.f = 50.0f},  {.f = 0.5f}},
+    {"Kd",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.wheel_speed.kd},           {.f = 0.0f}, {.f = 50.0f},  {.f = 0.5f}},
+    {"PwmTrim", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_motionPid.wheel_speed.pwm_trim_max}, {.f = 0.0f}, {.f = 30.0f},  {.f = 1.0f}},
+};
+#define WHEEL_SPEED_PID_ITEM_COUNT  (sizeof(wheelSpeedPidItems) / sizeof(wheelSpeedPidItems[0]))
+
 static const MenuItem pidItems[] = {
-    {"Straight", MENU_SUBMENU, straightYawPidItems, (uint8_t)STRAIGHT_YAW_PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"TurnYaw",  MENU_SUBMENU, turnYawPidItems,     (uint8_t)TURN_YAW_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Straight",  MENU_SUBMENU, straightYawPidItems, (uint8_t)STRAIGHT_YAW_PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"TurnYaw",   MENU_SUBMENU, turnYawPidItems,     (uint8_t)TURN_YAW_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"SpeedIn",   MENU_SUBMENU, wheelSpeedPidItems,  (uint8_t)WHEEL_SPEED_PID_ITEM_COUNT,  MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Yaw Status", MENU_LEAF,    NULL,                0,                                   MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 #define PID_ITEM_COUNT  (sizeof(pidItems) / sizeof(pidItems[0]))
+#define PID_YAW_STATUS_INDEX 3U
 
 static const MenuItem testItems[] = {
     {"LED Test",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
@@ -154,6 +165,8 @@ static const MenuItem rootItems[] = {
 /* Scroll offset (module-level, reset on menu layer change via Menu_Enter / Menu_Back) */
 static uint8_t g_scrollOfs = 0;
 static const char *g_lastKeyMsg = "Key:--";
+static bool g_insViewFirstRender = true;
+static bool g_yawStatusFirstRender = true;
 
 /* ================================================================
  *  Helper: decimals from float step
@@ -368,14 +381,14 @@ static void auto_test_tick(DevTFT *tft, const MenuCtx *ctx, bool inLeaf)
  * ================================================================ */
 static void ins_view_render(DevTFT *tft)
 {
-    static bool firstRender = true;
     static float prevX = -999.0f, prevY = -999.0f, prevM1 = -999.0f, prevM2 = -999.0f, prevYaw = -999.0f;
 
-    if (firstRender) {
+    if (g_insViewFirstRender) {
+        g_insViewFirstRender = false;
+        prevX = prevY = prevM1 = prevM2 = prevYaw = -999.0f;
         tft->fillScreen(tft, TFT_BLACK);
         tft->printString(tft, 0, 0, "--- INS ---", TFT_YELLOW, TFT_BLACK);
         tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
-        firstRender = false;
     }
 
     INS_Pose_t pose;
@@ -413,6 +426,53 @@ static void ins_view_render(DevTFT *tft)
 }
 
 /* ================================================================
+ *  PID Yaw Status leaf page (200ms auto-refresh, diff per-line)
+ * ================================================================ */
+static const char *yaw_status_state_name(Motion_RtState_t s)
+{
+    switch (s) {
+        case MOTION_RT_FWD:  return "FWD";
+        case MOTION_RT_BACK: return "BACK";
+        case MOTION_RT_TURN: return "TURN";
+        default:             return "IDLE";
+    }
+}
+
+static void yaw_status_render(DevTFT *tft)
+{
+    static Motion_RtState_t prevState = (Motion_RtState_t)(-1);
+    static float prevTarget = -999.0f, prevActual = -999.0f;
+
+    if (g_yawStatusFirstRender) {
+        g_yawStatusFirstRender = false;
+        prevState = (Motion_RtState_t)(-1);
+        prevTarget = prevActual = -999.0f;
+        tft->fillScreen(tft, TFT_BLACK);
+        tft->printString(tft, 0, 0, "--- Yaw ---", TFT_YELLOW, TFT_BLACK);
+        tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
+    }
+
+    if (g_motionRtStatus.state != prevState) {
+        tft->fillRect(tft, 0, MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, MENU_ROW_H, TFT_WHITE, TFT_BLACK,
+                    "St: %s", yaw_status_state_name(g_motionRtStatus.state));
+        prevState = g_motionRtStatus.state;
+    }
+    if (g_motionRtStatus.target_yaw_deg != prevTarget) {
+        tft->fillRect(tft, 0, 2 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, 2 * MENU_ROW_H, TFT_WHITE, TFT_BLACK,
+                    "Tgt: %+.2f deg", (double)g_motionRtStatus.target_yaw_deg);
+        prevTarget = g_motionRtStatus.target_yaw_deg;
+    }
+    if (g_motionRtStatus.actual_yaw_deg != prevActual) {
+        tft->fillRect(tft, 0, 3 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+        tft->printf(tft, 0, 3 * MENU_ROW_H, TFT_WHITE, TFT_BLACK,
+                    "Act: %+.2f deg", (double)g_motionRtStatus.actual_yaw_deg);
+        prevActual = g_motionRtStatus.actual_yaw_deg;
+    }
+}
+
+/* ================================================================
  *  TFT menu task
  * ================================================================ */
 void tft_task(void *pvParameters)
@@ -435,6 +495,7 @@ void tft_task(void *pvParameters)
 
     bool inLeaf = false;
     bool insViewLeaf = false;
+    bool yawStatusLeaf = false;
     menu_render_full(tft, &menuCtx);
 
     DevEncoder_Event_t evt;
@@ -444,6 +505,8 @@ void tft_task(void *pvParameters)
             auto_test_tick(tft, &menuCtx, inLeaf);
             if (insViewLeaf) {
                 ins_view_render(tft);
+            } else if (yawStatusLeaf) {
+                yaw_status_render(tft);
             }
             continue;
         }
@@ -453,6 +516,7 @@ void tft_task(void *pvParameters)
                 g_lastKeyMsg = "Key:LONG";
                 inLeaf = false;
                 insViewLeaf = false;
+                yawStatusLeaf = false;
                 Menu_Back(&menuCtx);
                 g_scrollOfs = 0;
                 menu_render_full(tft, &menuCtx);
@@ -507,8 +571,13 @@ void tft_task(void *pvParameters)
                     } else {
                         inLeaf = true;
                         if (cur == &rootItems[ROOT_INS_VIEW_INDEX]) {
+                            g_insViewFirstRender = true;
                             insViewLeaf = true;
                             ins_view_render(tft);
+                        } else if (cur == &pidItems[PID_YAW_STATUS_INDEX]) {
+                            g_yawStatusFirstRender = true;
+                            yawStatusLeaf = true;
+                            yaw_status_render(tft);
                         } else {
                             leaf_render(tft, cur);
                         }

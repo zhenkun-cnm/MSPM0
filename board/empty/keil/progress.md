@@ -43,3 +43,16 @@
 - [x] Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。
 - [x] build.log 确认 `app_ins.c / app_ins_cmd.c / app_motion.c / port_uart_rx.c` 均参与编译。
 - [x] 唯一 warning 仍为既有 `LED_PORT` macro redefined。
+## 2026-07-17 - NAV v1 implemented
+
+- Added `app_nav` navigation layer above INS pose and motion PID.
+- Commands now include `nav help/status/stop/goto/square`.
+- NAV v1 uses turn-to-target, drive-to-target, turn-to-final-yaw.
+- Flash logging continues to use existing INS logs.
+- Keil rebuild passed with `0 Error(s), 1 Warning(s)` after cleanup; remaining warning is the existing `LED_PORT` macro redefinition.
+## 2026-07-17 - Fixed NAV square sequencing
+
+- Added `cmd_id` handshake between NAV and motion.
+- NAV now waits for exact motion accept/done feedback.
+- `nav square <side_m>` now executes four forward legs and four `+90 deg` turns.
+- Keil rebuild passed with `0 Error(s), 1 Warning(s)`.

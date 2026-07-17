@@ -174,3 +174,16 @@ if (ret == pdPASS) {
 - [x] Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。
 - [x] build.log 确认 `app_ins.c / app_ins_cmd.c / app_motion.c / port_uart_rx.c` 均参与编译。
 - [x] 唯一 warning 仍为既有 `LED_PORT` macro redefined。
+## 2026-07-17 - NAV v1 implemented
+
+- Added `app_nav` navigation layer on top of existing INS pose and motion PID primitives.
+- New UART commands: `nav help`, `nav status`, `nav stop`, `nav goto <x_m> <y_m> <yaw_deg>`, `nav square <side_m>`.
+- Navigation v1 uses turn-to-target, drive-to-target, turn-to-final-yaw. It intentionally does not do arcs, obstacle avoidance, or path smoothing yet.
+- Flash logging remains the existing INS log area; no new W25Q64 region was added.
+- Keil clean rebuild passed with `0 Error(s), 1 Warning(s)` after code cleanup; remaining warning is the existing `LED_PORT` macro redefinition in `port_led.c`.
+## 2026-07-17 - Fixed NAV square sequencing
+
+- Added motion command handshake fields: `cmd_id`, `active_cmd_id`, `done_cmd_id`, `rejected_cmd_id`, `last_result`.
+- NAV now waits for the exact motion `cmd_id` to be accepted and completed; rejected or non-starting motion commands put NAV into error.
+- Reworked `nav square <side_m>` from ideal waypoint navigation to an explicit sequence: four forward legs and four `+90 deg` left turns.
+- Keil clean rebuild passed: `0 Error(s), 1 Warning(s)`; the remaining warning is the existing `LED_PORT` macro redefinition.

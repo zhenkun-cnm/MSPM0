@@ -11,6 +11,7 @@
 #ifndef PORT_LOG_H
 #define PORT_LOG_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -24,6 +25,9 @@
 #define LOG_LEVEL_INFO  3
 #define LOG_LEVEL_DEBUG 4
 
+/* 全局 LOG 抑制标志：置 true 后所有 LOG_RAW/INFO/ERROR/DEBUG 静默 */
+extern bool g_log_suppress;
+
 /* 底层输出函数声明 */
 void LOG_OutputChar(char c);
 
@@ -31,7 +35,7 @@ void LOG_OutputChar(char c);
 
 #if LOG_LEVEL >= LOG_LEVEL_RAW
     #define LOG_RAW(fmt, ...)   do { \
-        log_printf_internal(fmt, ##__VA_ARGS__); \
+        if (!g_log_suppress) { log_printf_internal(fmt, ##__VA_ARGS__); } \
     } while(0)
 #else
     #define LOG_RAW(fmt, ...)
@@ -39,7 +43,7 @@ void LOG_OutputChar(char c);
 
 #if LOG_LEVEL >= LOG_LEVEL_ERROR
     #define LOG_ERROR(fmt, ...)  do { \
-        log_printf_internal("[ERR] " fmt, ##__VA_ARGS__); \
+        if (!g_log_suppress) { log_printf_internal("[ERR] " fmt, ##__VA_ARGS__); } \
     } while(0)
 #else
     #define LOG_ERROR(fmt, ...)
@@ -47,7 +51,7 @@ void LOG_OutputChar(char c);
 
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     #define LOG_INFO(fmt, ...)   do { \
-        log_printf_internal("[INFO] " fmt, ##__VA_ARGS__); \
+        if (!g_log_suppress) { log_printf_internal("[INFO] " fmt, ##__VA_ARGS__); } \
     } while(0)
 #else
     #define LOG_INFO(fmt, ...)
@@ -55,7 +59,7 @@ void LOG_OutputChar(char c);
 
 #if LOG_LEVEL >= LOG_LEVEL_DEBUG
     #define LOG_DEBUG(fmt, ...)  do { \
-        log_printf_internal("[DBG] %s:%d: " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+        if (!g_log_suppress) { log_printf_internal("[DBG] %s:%d: " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); } \
     } while(0)
 #else
     #define LOG_DEBUG(fmt, ...)
@@ -76,5 +80,13 @@ void LOG_OutputChar(char c);
  * @brief 内部 printf 格式化输出引擎
  */
 void log_printf_internal(const char *fmt, ...);
+
+/**
+ * @brief JustFloat 原始字节块发送（无格式化开销）
+ * @note  直接调用 DL_UART_Main_transmitDataBlocking，适用于 VOFA+ 等二进制协议
+ * @param data  字节数组指针
+ * @param len   字节数
+ */
+void LOG_SendRawBytes(const uint8_t *data, uint16_t len);
 
 #endif /* PORT_LOG_H */

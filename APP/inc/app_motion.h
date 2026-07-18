@@ -46,12 +46,14 @@ typedef enum {
     MOTION_CMD_STOP,
     MOTION_CMD_FWD,
     MOTION_CMD_BACK,
-    MOTION_CMD_TURN
+    MOTION_CMD_TURN,
+    MOTION_CMD_ARC
 } Motion_CommandType_t;
 
 typedef struct {
     Motion_CommandType_t type;
     float value;
+    float value2;
     uint32_t cmd_id;
 } Motion_Command_t;
 
@@ -62,7 +64,8 @@ typedef enum {
     MOTION_RT_IDLE = 0,
     MOTION_RT_FWD,
     MOTION_RT_BACK,
-    MOTION_RT_TURN
+    MOTION_RT_TURN,
+    MOTION_RT_ARC
 } Motion_RtState_t;
 
 typedef enum {
@@ -79,6 +82,10 @@ typedef struct {
     Motion_RtState_t state;
     float target_yaw_deg;
     float actual_yaw_deg;
+    float target_left_mps;
+    float actual_left_mps;
+    float target_right_mps;
+    float actual_right_mps;
     uint32_t active_cmd_id;
     uint32_t done_cmd_id;
     uint32_t rejected_cmd_id;

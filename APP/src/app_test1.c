@@ -133,6 +133,7 @@ static bool test1_send_motion_raw(Motion_CommandType_t type, float value, uint32
     Motion_Command_t cmd;
     cmd.type = type;
     cmd.value = value;
+    cmd.value2 = 0.0f;
     cmd.cmd_id = cmd_id;
 
     if (g_motionCmdQueue == NULL) {

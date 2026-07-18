@@ -534,6 +534,16 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_nav.c</FilePath>
             </File>
+            <File>
+              <FileName>app_path.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_path.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_test1.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_test1.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

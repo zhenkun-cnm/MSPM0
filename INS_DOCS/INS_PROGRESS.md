@@ -192,3 +192,109 @@ ins reset
 nav square 0.6
 ```
 串口应依次看到 `square drive 1/4`、`square turn 1/4`，直到 `square turn 4/4` 和 `square done`。
+## 2026-07-17 Test1 固定路线
+
+**现在新增了什么？**  
+新增 `app_test1`，用于赛题固定路线。串口发送 `test1 start` 或 `Test1` 启动。
+
+**路线是什么？**  
+```text
+X=90cm  Y=0cm    -> 右转90度
+X=96cm  Y=-90cm  -> 右转90度
+X=4cm   Y=-96cm  -> 右转90度
+X=0cm   Y=0cm    -> 右转90度
+```
+
+**如何关闭节省内存？**  
+在 `APP/inc/app_test1.h` 中将：
+```c
+#define APP_TEST1_ENABLE 1
+```
+改为：
+```c
+#define APP_TEST1_ENABLE 0
+```
+
+## 2026-07-17 Test1/nav turn-after-drive diagnostics
+
+**现象**  
+`test1 start` 和之前的 `nav square 0.6` 类似，实车表现为走完第一段直线后停止，不继续转弯。
+
+**本次处理**  
+- `app_motion.c` 增加硬回显 `[MOTION_ACK] accept/reject/done`，使用 `log_printf_internal()`，不受普通日志抑制影响。
+- `app_test1.c` 增加 `[TEST1_STEP]`，直行完成、发送右转、右转完成都会打印。
+- `app_nav.c` 增加 `[NAV_STEP]`，`nav square` 的直行完成、发送转弯、转弯完成都会打印。
+- 不修改 PID、轮径、轮距、M1/M2 counts/rev，也不修改 Test1 路线坐标。
+
+**下一次实车测试判据**  
+发送：
+```text
+ins reset
+test1 start
+```
+
+第一段直线完成后应看到：
+```text
+[TEST1_STEP] drive done, enter RIGHT_TURN
+[TEST1_STEP] send right turn ...
+[MOTION_ACK] accept ... type=TURN
+```
+
+如果仍不转弯：
+- 没有 `[TEST1_STEP] send right turn`：Test1 状态机没有进入右转发送。
+- 有 `[TEST1_STEP] send right turn` 但没有 `[MOTION_ACK] accept type=TURN`：motion 未接受或拒绝转弯命令。
+- 有 `[MOTION_ACK] accept type=TURN` 但电机不动：检查 TB6612 单轮转向、电机方向、PWM、brake/coast。
+- 有 accept 和 done 但车没转：检查 yaw 完成条件或 IMU yaw 数据。
+
+**编译结果**  
+Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。剩余 warning 是既有 `LED_PORT` 宏重复定义。
+## 2026-07-17 Arc motion and path teach/replay v1
+
+**现在新增了什么？**  
+新增标准圆弧命令和不规则路径手推记录/复现模块。
+
+**标准圆弧怎么测？**
+```text
+ins reset
+ins log on
+motion arc 0.50 90
+ins log off
+ins log print
+```
+
+右圆弧：
+```text
+ins reset
+ins log on
+motion arc 0.50 -90
+ins log off
+ins log print
+```
+
+**圆弧 PID 是几环？**  
+第一版只有轮速内环：左轮速度 PID + 右轮速度 PID。IMU yaw 只用来判断角度到达，不作为 yaw 外环 PID。
+
+**VOFA 输出是什么？**  
+当 `LOG_PRINT_PID_ENABLE=1` 时，圆弧运行期间输出 6 通道 JustFloat：
+```text
+target_left_mps
+actual_left_mps
+target_right_mps
+actual_right_mps
+target_yaw_deg
+actual_yaw_deg
+```
+
+**不规则圆弧怎么测？**
+```text
+ins reset
+path record start
+手推一段弧线或 S 形
+path record stop
+path print
+ins reset
+path replay
+```
+
+**编译结果**  
+Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。`app_path.c` 已参与编译，唯一 warning 仍是已有 `LED_PORT` 宏重复定义。

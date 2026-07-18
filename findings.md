@@ -141,3 +141,65 @@ start_task:
 - The old NAV-to-motion completion check could treat `MOTION_RT_IDLE` as completion even if the next motion command never actually started.
 - Single-wheel turning changes `X/Y`, so square should not be implemented as ideal fixed waypoints for this chassis.
 - The fix is command-level handshake plus square-as-action-sequence: drive, turn, drive, turn.
+## 2026-07-17 - Test1 route decisions
+
+- Test1 is implemented as a separate competition route module, not as `nav square`.
+- User-provided coordinates are centimeters; code stores meters.
+- Third point is `X=4cm, Y=-96cm`.
+- Right turns use relative `motion turn -90`.
+
+## 2026-07-17 - Turn-after-drive diagnosis rules
+
+- The observed failure "drive straight then stop, no turn" must be diagnosed by command chain, not by PID tuning first.
+- `[TEST1_STEP] send right turn` proves the Test1 state machine issued the turn command.
+- `[MOTION_ACK] accept ... type=TURN` proves motion accepted the turn command.
+- If turn is accepted but the car does not physically rotate, the next likely layer is TB6612 single-wheel turn control, motor wiring/direction, PWM output, or brake/coast behavior.
+- If motion accepts and reports done without physical turn, inspect yaw completion logic and IMU yaw validity.
+
+## 2026-07-17 - Arc/path v1 decisions
+
+- Standard arc testing belongs in `app_motion` first, not in `app_nav`, because it verifies the chassis can hold a differential wheel-speed ratio before higher-level path logic depends on it.
+- Arc v1 intentionally has no yaw/path outer PID: the only PID loops are left/right wheel-speed inner loops. IMU yaw stops the command when the requested angle is reached.
+- VOFA tuning should focus on 6 JustFloat channels: target/actual left speed, target/actual right speed, target/actual yaw.
+- Irregular arcs are implemented as teach/replay discrete points in RAM first. This keeps the first replay implementation debuggable and avoids introducing continuous path tracking before standard arcs are observed.
+
+## 2026-07-17 - TFT PID menu findings
+
+- Arc v1 does not need a separate new PID parameter group yet. It reuses the existing wheel-speed PID because the first arc controller is only left/right wheel-speed inner loops.
+- A dedicated `Arc Status` page is useful because VOFA requires enabling raw JustFloat output, while TFT can continuously show target/actual wheel speeds during ordinary bench tuning.
+- `Yaw Status` now labels `MOTION_RT_ARC` as `ARC`, so the motion state display no longer collapses arc mode into IDLE.
+
+## 2026-07-17 - Arc control finding
+
+- The wheel-speed feedback is too quantized/noisy for strong speed PID or D-term tuning.
+- For the current chassis, arc testing should prioritize stable fixed left/right PWM ratio plus small feedback correction.
+- `Kd` should stay at 0 unless encoder velocity is filtered more heavily or replaced by more reliable hardware capture.
+
+## 2026-07-17 - Arc asymmetry finding
+
+- Right arcs are repeatable enough to use as the current baseline.
+- Left arcs have acceptable yaw completion but a smaller effective radius/translation than right arcs.
+- The first compensation should reduce left-turn curvature without changing right-turn behavior.
+
+## 2026-07-17 - Teach/replay priority
+
+- Since the target use case is push-once/replay, standard arc tuning only needs to be good enough to support segment replay.
+- Point-to-point replay creates a polygonal path and loses the pushed arc shape.
+- Segment replay using recorded yaw deltas plus `motion arc` should preserve arcs better than turn+drive replay.
+
+## 2026-07-17 - Continuous replay decision
+
+- Segment replay still creates visible pauses because each segment waits for `motion` completion.
+- Continuous tracking should be the preferred path replay v2 because the user prioritizes smooth replay of a pushed curve over exact per-segment completion.
+- Initial continuous tracking should tune lookahead/base PWM/yaw Kp before returning to wheel-speed PID work.
+
+## 2026-07-17 - Path tracking curvature observation
+
+- Logs showed persistent negative heading error around `-10..-15deg`, so the controller knew the target was inside the current heading but was not steering tightly enough.
+- Smaller lookahead and higher yaw gain are the correct first knobs before changing base speed.
+
+## 2026-07-17 - Path capacity finding
+
+- The 64-point record limit was a fixed RAM buffer limit, not an algorithmic limit.
+- Increasing to 160 points costs about 1.9KB total path-point storage, which is acceptable on the current build.
+- If future paths need much more than 160 points, the next step should be adjustable downsampling or flash-backed recording rather than blindly growing RAM.

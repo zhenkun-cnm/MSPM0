@@ -75,6 +75,9 @@ void LOG_OutputChar(char c);
 #ifndef LOG_PRINT_MOTOR_ENABLE
 #define LOG_PRINT_MOTOR_ENABLE   0   /* app_motor_encoder.c: M1/M2 编码器 */
 #endif
+#ifndef LOG_PRINT_PID_ENABLE
+#define LOG_PRINT_PID_ENABLE     0   /* app_motion.c: VOFA+ JustFloat */
+#endif
 
 /**
  * @brief 内部 printf 格式化输出引擎

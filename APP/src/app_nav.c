@@ -124,6 +124,7 @@ static bool nav_send_motion_raw(Motion_CommandType_t type, float value, uint32_t
     Motion_Command_t cmd;
     cmd.type = type;
     cmd.value = value;
+    cmd.value2 = 0.0f;
     cmd.cmd_id = cmd_id;
 
     if (g_motionCmdQueue == NULL) {
@@ -172,6 +173,26 @@ static bool nav_start_motion_step(Nav_Runtime_t *rt, Motion_CommandType_t type, 
     return true;
 }
 
+static const char *nav_motion_type_name(Motion_CommandType_t type)
+{
+    switch (type) {
+        case MOTION_CMD_FWD:  return "FWD";
+        case MOTION_CMD_TURN: return "TURN";
+        case MOTION_CMD_BACK: return "BACK";
+        case MOTION_CMD_STOP: return "STOP";
+        default:              return "?";
+    }
+}
+
+static void nav_step_send_motion(const Nav_Runtime_t *rt, Motion_CommandType_t type, float value)
+{
+    log_printf_internal("[NAV_STEP] send motion cmd_id=0x%08lX type=%s value=%+.3f state=%s\r\n",
+                        (unsigned long)rt->waiting_motion_cmd_id,
+                        nav_motion_type_name(type),
+                        value,
+                        nav_state_name(rt->state));
+}
+
 static int8_t nav_motion_step_result(Nav_Runtime_t *rt)
 {
     uint32_t elapsed_ms;
@@ -181,8 +202,8 @@ static int8_t nav_motion_step_result(Nav_Runtime_t *rt)
     }
 
     if (g_motionRtStatus.rejected_cmd_id == rt->waiting_motion_cmd_id) {
-        LOG_RAW("[NAV] error: motion rejected cmd_id=%lu\r\n",
-                (unsigned long)rt->waiting_motion_cmd_id);
+        log_printf_internal("[NAV_STEP] motion rejected cmd_id=0x%08lX\r\n",
+                            (unsigned long)rt->waiting_motion_cmd_id);
         return -1;
     }
 
@@ -194,16 +215,20 @@ static int8_t nav_motion_step_result(Nav_Runtime_t *rt)
         if (g_motionRtStatus.last_result == MOTION_RESULT_DONE) {
             return 1;
         }
-        LOG_RAW("[NAV] error: motion finished cmd_id=%lu result=%s\r\n",
-                (unsigned long)rt->waiting_motion_cmd_id,
-                nav_motion_result_name(g_motionRtStatus.last_result));
+        log_printf_internal("[NAV_STEP] motion finished cmd_id=0x%08lX result=%s\r\n",
+                            (unsigned long)rt->waiting_motion_cmd_id,
+                            nav_motion_result_name(g_motionRtStatus.last_result));
         return -1;
     }
 
     elapsed_ms = (uint32_t)((xTaskGetTickCount() - rt->motion_cmd_tick) * portTICK_PERIOD_MS);
     if (!rt->motion_accepted && elapsed_ms >= NAV_MOTION_START_TIMEOUT_MS) {
-        LOG_RAW("[NAV] error: motion did not start cmd_id=%lu\r\n",
-                (unsigned long)rt->waiting_motion_cmd_id);
+        log_printf_internal("[NAV_STEP] motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
+                            (unsigned long)rt->waiting_motion_cmd_id,
+                            (int)g_motionRtStatus.state,
+                            (unsigned long)g_motionRtStatus.active_cmd_id,
+                            (unsigned long)g_motionRtStatus.done_cmd_id,
+                            nav_motion_result_name(g_motionRtStatus.last_result));
         return -1;
     }
 
@@ -466,6 +491,8 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
                         rt->target_heading_deg);
                 if (!nav_start_motion_step(rt, MOTION_CMD_TURN, turn_delta)) {
                     nav_enter_error(rt, "motion command failed");
+                } else {
+                    nav_step_send_motion(rt, MOTION_CMD_TURN, turn_delta);
                 }
             } else {
                 motion_result = nav_motion_step_result(rt);
@@ -495,6 +522,8 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
                 LOG_RAW("[NAV] drive_to_target dist=%.3f\r\n", dist);
                 if (!nav_start_motion_step(rt, MOTION_CMD_FWD, dist)) {
                     nav_enter_error(rt, "motion command failed");
+                } else {
+                    nav_step_send_motion(rt, MOTION_CMD_FWD, dist);
                 }
             } else {
                 motion_result = nav_motion_step_result(rt);
@@ -522,6 +551,8 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
                         rt->target_yaw_deg);
                 if (!nav_start_motion_step(rt, MOTION_CMD_TURN, turn_delta)) {
                     nav_enter_error(rt, "motion command failed");
+                } else {
+                    nav_step_send_motion(rt, MOTION_CMD_TURN, turn_delta);
                 }
             } else {
                 motion_result = nav_motion_step_result(rt);
@@ -550,12 +581,17 @@ static void nav_update_square(Nav_Runtime_t *rt)
                     rt->square_side_m);
             if (!nav_start_motion_step(rt, MOTION_CMD_FWD, rt->square_side_m)) {
                 nav_enter_error(rt, "motion command failed");
+            } else {
+                nav_step_send_motion(rt, MOTION_CMD_FWD, rt->square_side_m);
             }
             return;
         }
 
         motion_result = nav_motion_step_result(rt);
         if (motion_result > 0) {
+            log_printf_internal("[NAV_STEP] square drive done, enter square turn leg=%u/%u\r\n",
+                                (unsigned)(rt->square_leg + 1U),
+                                NAV_SQUARE_LEGS);
             rt->state = NAV_STATE_SQUARE_TURN;
             nav_reset_motion_wait(rt);
         } else if (motion_result < 0) {
@@ -572,12 +608,21 @@ static void nav_update_square(Nav_Runtime_t *rt)
                     NAV_SQUARE_TURN_DEG);
             if (!nav_start_motion_step(rt, MOTION_CMD_TURN, NAV_SQUARE_TURN_DEG)) {
                 nav_enter_error(rt, "motion command failed");
+            } else {
+                log_printf_internal("[NAV_STEP] send square turn cmd_id=0x%08lX yaw_delta=%+.1f leg=%u/%u\r\n",
+                                    (unsigned long)rt->waiting_motion_cmd_id,
+                                    NAV_SQUARE_TURN_DEG,
+                                    (unsigned)(rt->square_leg + 1U),
+                                    NAV_SQUARE_LEGS);
             }
             return;
         }
 
         motion_result = nav_motion_step_result(rt);
         if (motion_result > 0) {
+            log_printf_internal("[NAV_STEP] square turn done leg=%u/%u\r\n",
+                                (unsigned)(rt->square_leg + 1U),
+                                NAV_SQUARE_LEGS);
             rt->square_leg++;
             nav_reset_motion_wait(rt);
             if (rt->square_leg >= NAV_SQUARE_LEGS) {

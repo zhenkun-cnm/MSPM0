@@ -77,3 +77,161 @@ Test next:
 - `nav square 0.6`
 - Confirm logs show four drive steps and four turn steps.
 - Use `nav status` / `motion status` if any step is rejected or does not start.
+## 2026-07-17 - Test1 fixed route
+
+Status: implemented and build-verified.
+
+Test next:
+- `ins reset`
+- `ins log on`
+- `test1 start`
+- `test1 status` if needed.
+
+## 2026-07-17 - Test1/nav turn-after-drive diagnostic fix
+
+Status: implemented and build-verified.
+
+Completed:
+- Added `[MOTION_ACK] accept/reject/done` hard echoes in motion.
+- Added `[TEST1_STEP]` transition logs around drive completion and right-turn command sending.
+- Added `[NAV_STEP]` transition logs around square drive completion and turn command sending.
+
+Next validation:
+- `ins reset`
+- `test1 start`
+- Confirm first straight leg is followed by `[TEST1_STEP] send right turn` and `[MOTION_ACK] accept ... type=TURN`.
+- If physical turning still does not happen after accept, move diagnosis to TB6612/motor command layer.
+
+## 2026-07-17 - Arc/path v1
+
+Status: implemented and build-verified.
+
+Completed:
+- Added standard arc command: `motion arc <radius_m> <angle_deg>`.
+- Added 6-channel VOFA JustFloat output for arc PID tuning.
+- Added `app_path` RAM teach/replay module.
+- Registered `app_path.c` in Keil project files.
+
+Next validation:
+- `ins reset`
+- `ins log on`
+- `motion arc 0.50 90`
+- `ins log off`
+- `ins log print`
+- Repeat with `motion arc 0.50 -90`.
+- For irregular paths: `path record start`, push path, `path record stop`, `path print`, `ins reset`, `path replay`.
+
+## 2026-07-17 - TFT PID menu for arc tuning
+
+Status: implemented and build-verified.
+
+Completed:
+- Renamed top-level speed PID menu entry to `WheelSpd`.
+- Added `PID -> Arc -> WheelSpd`.
+- Added `PID -> Arc -> Arc Status`.
+- Exposed arc target/actual wheel-speed runtime fields for the TFT page.
+
+Next validation:
+- Flash firmware.
+- Open TFT menu: `PID -> Arc -> WheelSpd`, tune Kp/Ki/Kd/PwmTrim.
+- Open TFT menu: `PID -> Arc -> Arc Status`, then run `motion arc 0.50 90`.
+- Confirm left/right target speeds are nonzero and actual speeds change while the arc is running.
+
+## 2026-07-17 - Arc weak closed-loop mode
+
+Status: implemented and build-verified.
+
+Completed:
+- Filtered arc wheel-speed feedback before PID use.
+- Capped arc PID trim to +/-4 PWM points.
+- Added arc PWM slew limit of 2 PWM points per 10ms update.
+- Changed default wheel-speed PID to `80/0/0/10`.
+
+Next validation:
+- Flash firmware.
+- Run `motion status` and confirm `WheelSpd Kp=80.00 Ki=0.00 Kd=0.00 PwmTrim=10.0` after reset.
+- Run `ins reset`, then `motion arc 0.50 -90`.
+- Judge by physical smoothness and yaw completion first; treat wheel-speed `actual` only as a rough indicator.
+
+## 2026-07-17 - Left arc compensation
+
+Status: implemented and build-verified.
+
+Completed:
+- Added `MOTION_ARC_LEFT_INNER_SCALE = 1.10`.
+- Added `MOTION_ARC_LEFT_OUTER_SCALE = 0.95`.
+- Applied compensation only when `angle_deg > 0`.
+
+Next validation:
+- Run three trials of `ins reset`, `motion arc 0.50 90`.
+- Compare with previous left arc baseline: `X=0.34..0.43, Y=0.39..0.42, yaw=95..96`.
+- Right arc does not need retesting unless left compensation changes shared behavior unexpectedly.
+
+## 2026-07-17 - Path replay as arc segments
+
+Status: implemented and build-verified.
+
+Completed:
+- Added path motion send support for `value2`.
+- Changed `path replay` to infer arc radius from consecutive recorded points and yaw delta.
+- Falls back to `motion fwd` for near-straight segments and `motion turn` for tiny in-place yaw-only segments.
+
+Next validation:
+- `ins reset`
+- `path clear`
+- `path record start`
+- Push one smooth arc or S curve.
+- `path record stop`
+- `path print`
+- Put car back at the recorded start pose.
+- `ins reset`
+- `path replay`
+
+## 2026-07-17 - Continuous path replay v2
+
+Status: implemented and build-verified.
+
+Completed:
+- Added `PATH_STATE_REPLAY_TRACK`.
+- `path replay` now directly controls TB6612 left/right PWM continuously.
+- Added lookahead heading tracking and PWM slew limiting.
+- Added tracking fields to `path status` and `[PATH_TRACK]` logs.
+
+Next validation:
+- `ins reset`
+- `path clear`
+- `path record start`
+- Push one smooth arc or S curve.
+- `path record stop`
+- `path print`
+- Put car back at the recorded start pose and direction.
+- `ins reset`
+- `path replay`
+- Watch for no obvious stop-and-go behavior and record final translation error.
+
+## 2026-07-17 - Path tracking curvature tighten
+
+Status: implemented and build-verified.
+
+Completed:
+- `PATH_TRACK_LOOKAHEAD_M = 0.10`
+- `PATH_TRACK_YAW_KP = 0.35`
+- `PATH_TRACK_COMPLETE_DIST_M = 0.06`
+
+Next validation:
+- Replay the same recorded arc/S curve again.
+- Check whether final yaw is closer to recorded final yaw and whether the replay arc radius is less oversized.
+
+## 2026-07-17 - Path record capacity increase
+
+Status: implemented and build-verified.
+
+Completed:
+- `PATH_MAX_POINTS = 160`
+- Path count and replay indexes widened to `uint16_t`.
+- No lower-priority task memory reduction was needed; build RAM summary remained acceptable.
+
+Next validation:
+- Run `path clear`, `path record start`, and push a longer mixed line/arc path.
+- Confirm `path record stop` reports more than 64 points when the pushed path is long enough.
+- Keep the first long test near 150 points before considering a larger buffer.

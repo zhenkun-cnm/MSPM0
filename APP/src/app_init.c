@@ -16,6 +16,8 @@
 #include "app_ins_cmd.h"
 #include "app_motion.h"
 #include "app_nav.h"
+#include "app_path.h"
+#include "app_test1.h"
 #include "dev_led.h"
 #include "dev_encoder.h"
 #include "port_log.h"
@@ -41,6 +43,10 @@ extern void ins_task(void *pvParameters);
 extern void ins_cmd_task(void *pvParameters);
 extern void motion_task(void *pvParameters);
 extern void nav_task(void *pvParameters);
+extern void path_task(void *pvParameters);
+#if APP_TEST1_ENABLE
+extern void test1_task(void *pvParameters);
+#endif
  
 /* 任务句柄 */
 static TaskHandle_t s_startTaskHandle;
@@ -111,6 +117,18 @@ static void start_task(void *pvParameters)
     if (g_navCmdQueue == NULL) {
         LOG_ERROR("[INIT] nav cmd queue create failed!\r\n");
     }
+
+    g_pathCmdQueue = xQueueCreate(PATH_CMD_QUEUE_LEN, sizeof(Path_Command_t));
+    if (g_pathCmdQueue == NULL) {
+        LOG_ERROR("[INIT] path cmd queue create failed!\r\n");
+    }
+
+#if APP_TEST1_ENABLE
+    g_test1CmdQueue = xQueueCreate(TEST1_CMD_QUEUE_LEN, sizeof(Test1_Command_t));
+    if (g_test1CmdQueue == NULL) {
+        LOG_ERROR("[INIT] test1 cmd queue create failed!\r\n");
+    }
+#endif
  
     /* 创建编码器应用任务（内部包含 5ms 周期轮询） */
     xTaskCreate(
@@ -161,7 +179,7 @@ static void start_task(void *pvParameters)
     BaseType_t insCreateOk = xTaskCreate(
         ins_task,
         "ins",
-        512,
+        400,
         NULL,
         4,
         NULL
@@ -189,7 +207,7 @@ static void start_task(void *pvParameters)
     BaseType_t motionCreateOk = xTaskCreate(
         motion_task,
         "motion",
-        384,
+        300,
         NULL,
         3,
         NULL
@@ -213,6 +231,36 @@ static void start_task(void *pvParameters)
     } else {
         LOG_INFO("  NAV task created (prio=2)\r\n");
     }
+
+    BaseType_t pathCreateOk = xTaskCreate(
+        path_task,
+        "path",
+        384,
+        NULL,
+        2,
+        NULL
+    );
+    if (pathCreateOk != pdPASS) {
+        LOG_ERROR("[INIT] path task create failed!\r\n");
+    } else {
+        LOG_INFO("  PATH task created (prio=2)\r\n");
+    }
+
+#if APP_TEST1_ENABLE
+    BaseType_t test1CreateOk = xTaskCreate(
+        test1_task,
+        "test1",
+        384,
+        NULL,
+        2,
+        NULL
+    );
+    if (test1CreateOk != pdPASS) {
+        LOG_ERROR("[INIT] test1 task create failed!\r\n");
+    } else {
+        LOG_INFO("  TEST1 task created (prio=2)\r\n");
+    }
+#endif
 
     /* 创建 Flash 开机自检任务 (W25Q64, 最低优先级, 完成后自动删除) */
     xTaskCreate(

@@ -186,3 +186,192 @@ nav square 0.6
 [NAV] square drive 2/4 dist=0.600
 [NAV] square turn 2/4 yaw_delta=+90.0
 一直到 4/4 完成。
+2026-07-17 - Test1 赛题固定路线已加入
+
+新增了什么？
+答：新增了独立 Test1 程序，用串口命令启动固定路线。它不是 nav square，也不是临时测试代码，而是单独的赛题路线模块。
+
+怎么启动？
+答：
+ins reset
+ins log on
+test1 start
+
+也兼容直接发送：
+Test1
+
+路线是什么？
+答：你给的单位是 cm，代码内部自动换算为 m：
+1. 到 X=90cm, Y=0cm
+2. 右转 90 度
+3. 到 X=96cm, Y=-90cm
+4. 右转 90 度
+5. 到 X=4cm, Y=-96cm
+6. 右转 90 度
+7. 回到 X=0cm, Y=0cm
+8. 右转 90 度
+
+怎么省内存？
+答：在 `APP/inc/app_test1.h` 中：
+#define APP_TEST1_ENABLE 1
+
+改成 0 后，Test1 队列和任务不会创建，串口会提示 Test1 disabled。
+
+2026-07-17 - Test1/nav 直线后不转弯诊断版
+
+问：这次到底修了什么？
+答：这次没有改 PID、轮径、编码器参数，也没有改 Test1 路线坐标。重点是把“直行完成 -> 发转弯命令 -> motion 接受转弯 -> motion 完成转弯”这条链路做成串口硬回显。这样如果小车还是只走直线，我们可以马上知道问题卡在哪一层。
+
+问：串口会多打印什么？
+答：新增三类关键日志：
+[MOTION_ACK]：motion 层收到、拒绝、完成命令时打印，不受普通日志抑制影响。
+[TEST1_STEP]：Test1 每一步切换时打印，比如直行完成、发送右转、右转完成。
+[NAV_STEP]：nav square 每一步切换时打印，比如一条边完成、发送 90 度转弯、转弯完成。
+
+问：测试 test1 start 时我应该看到什么？
+答：推荐流程：
+ins reset
+test1 start
+
+直线结束后至少应该看到：
+[TEST1_STEP] drive done, enter RIGHT_TURN
+[TEST1_STEP] send right turn ...
+[MOTION_ACK] accept ... type=TURN
+
+问：如果还是不转弯，怎么判断？
+答：
+1. 如果没有 [TEST1_STEP] send right turn，说明 Test1 状态机没有走到右转发送阶段。
+2. 如果有 [TEST1_STEP] send right turn，但没有 [MOTION_ACK] accept type=TURN，说明 motion 拒绝了或没有接收到转弯命令。
+3. 如果有 [MOTION_ACK] accept type=TURN，但车不动，问题转到 TB6612/电机方向/PWM/刹车控制层。
+4. 如果有 accept 也有 done，但车没实际转，说明 yaw 判断、IMU yaw 或转向完成条件需要继续检查。
+
+问：本次编译结果？
+答：Keil clean rebuild 通过：0 Error(s), 1 Warning(s)。唯一 warning 仍是已有的 LED_PORT 宏重复定义，和这次 Test1/nav/motion 修复无关。
+2026-07-17 - 圆弧测试 v1 已加入
+
+问：现在圆弧怎么测？
+答：标准左圆弧：
+ins reset
+ins log on
+motion arc 0.50 90
+ins log off
+ins log print
+
+标准右圆弧：
+ins reset
+ins log on
+motion arc 0.50 -90
+ins log off
+ins log print
+
+问：圆弧 PID 是几环？
+答：第一版只有轮速内环，左轮速度 PID 和右轮速度 PID 并行工作。IMU yaw 只负责判断圆弧角度是否到达，不参与外环 PID。
+
+问：VOFA 看什么？
+答：当 LOG_PRINT_PID_ENABLE=1 时，圆弧运行期间输出 6 个 JustFloat 通道：
+target_left_mps / actual_left_mps / target_right_mps / actual_right_mps / target_yaw_deg / actual_yaw_deg。
+
+问：不规则圆弧怎么做？
+答：第一版使用手推记录离散路点，然后逐点复现：
+ins reset
+path record start
+手推一段弧线或 S 形
+path record stop
+path print
+ins reset
+path replay
+
+问：编译结果？
+答：Keil clean rebuild 通过：0 Error(s), 1 Warning(s)。app_path.c 已参与编译，唯一 warning 仍是已有 LED_PORT 宏重复定义。
+
+2026-07-18 - 连续路径回放 + W25Q 保存/读取怎么用
+
+问：现在 path record 最多能记录多少点？
+答：已经从 64 点提高到 160 点。目标是至少能采 150 个点。每个点保存 X、Y、YAW 三个 float，所以 160 点大约占 1920 字节 RAM，目前不需要减少其他线程。
+
+问：现在 path replay 是怎么走的？
+答：现在默认是连续路径跟踪，不再按一个个小段停车。回放时 `path_task` 会持续读取 INS 位姿，寻找前视目标点，然后直接输出左右轮 PWM。你之前看到的“停顿明显、折线化”已经改成连续跟踪方式。
+
+问：可以直线和圆弧混合吗？
+答：可以。你手推记录的路径可以包含直线、圆弧、S 弯、不规则弧线。`path replay` 不关心它是不是标准圆弧，只会跟踪记录下来的 X/Y/YAW 点列。
+
+问：新加的 W25Q 命令是什么？
+答：新增两个核心命令：
+path save
+path load
+
+也支持两个别名：
+path flash save
+path flash load
+
+问：path save 做什么？
+答：把当前 RAM 里的路径点保存到 W25Q Flash。保存位置是 0x000F0000，单独使用 1 个 4KB 扇区，不覆盖 INS log 的 0x00100000 区域。
+
+问：path load 做什么？
+答：从 W25Q Flash 读取之前保存的路径，并覆盖当前 RAM 里的路径点。读取时会检查 magic、version、点大小、点数量、数据长度和 checksum，防止空 Flash 或坏数据覆盖 RAM。
+
+问：保存一条路径的推荐流程是什么？
+答：推荐这样做：
+ins reset
+path clear
+path record start
+手推一段直线、圆弧或 S 弯
+path record stop
+path print
+path save
+
+看到类似下面输出就说明保存成功：
+[PATH_FLASH] save ok count=... checksum=...
+
+问：断电或清空 RAM 后怎么恢复路径？
+答：推荐这样做：
+path load
+path print
+
+如果 `path print` 打印出的点数和坐标与保存前一致，说明 W25Q 读取正常。
+
+问：读取后怎么回放？
+答：把车放回记录起点并对齐方向，然后执行：
+ins reset
+path replay
+
+注意：`path load` 只恢复路径点，不会自动恢复小车的真实物理位置。回放前还是要把车放回记录起点，并尽量对齐记录时的起始方向。
+
+问：什么时候不能 save/load？
+答：正在录制或正在回放时不能保存/读取。需要先执行：
+path record stop
+
+或者：
+path stop
+
+再执行：
+path save
+path load
+
+问：如果 path load 报错怎么办？
+答：常见情况：
+1. `[PATH_FLASH] error: no valid path in flash`：Flash 里还没有保存过有效路径，先录制并 `path save`。
+2. `[PATH_FLASH] error: checksum mismatch`：读出的数据校验失败，重新录制并保存。
+3. `[PATH_FLASH] error: stop record/replay before load`：当前还在录制或回放，先 `path record stop` 或 `path stop`。
+
+问：完整测试 W25Q 路径保存读取怎么做？
+答：最短验证流程：
+ins reset
+path clear
+path record start
+手推一小段路径
+path record stop
+path print
+path save
+path clear
+path print
+path load
+path print
+
+期望结果：
+1. `path clear` 后 `path print` 应该显示 count=0。
+2. `path load` 后 `path print` 应该恢复保存前的点数和坐标。
+3. 确认恢复正常后，再把车放回起点，执行 `ins reset` 和 `path replay`。
+
+问：本次编译结果？
+答：Keil clean rebuild 通过：0 Error(s), 1 Warning(s)。唯一 warning 仍是已有的 LED_PORT 宏重复定义，和 path save/load 无关。

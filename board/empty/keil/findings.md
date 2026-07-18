@@ -60,3 +60,65 @@
 - `nav square` could skip steps because completion was inferred from motion IDLE state.
 - Single-wheel turning changes `X/Y`, so square is now an action sequence instead of fixed ideal waypoints.
 - Motion rejection/non-start is now visible through `rejected_cmd_id` and `last_result`.
+## 2026-07-17 - Test1 decisions
+
+- Test1 is a fixed competition route module, separate from generic NAV.
+- Coordinates are centimeters converted to meters.
+- Third target is `X=4cm, Y=-96cm`.
+- Every waypoint is followed by `motion turn -90`.
+
+## 2026-07-17 - Turn-after-drive diagnosis rules
+
+- The observed failure "drive straight then stop, no turn" must be diagnosed by command chain, not by PID tuning first.
+- `[TEST1_STEP] send right turn` proves the Test1 state machine issued the turn command.
+- `[MOTION_ACK] accept ... type=TURN` proves motion accepted the turn command.
+- If turn is accepted but the car does not physically rotate, the next likely layer is TB6612 single-wheel turn control, motor wiring/direction, PWM output, or brake/coast behavior.
+- If motion accepts and reports done without physical turn, inspect yaw completion logic and IMU yaw validity.
+
+## 2026-07-17 - Arc/path v1 findings
+
+- Arc v1 should tune wheel-speed PID first; Test1 already validated straight and single-wheel turn enough to avoid retuning those loops immediately.
+- IMU yaw is only the arc completion condition in v1, not an outer PID loop.
+- VOFA JustFloat for arc uses 6 channels so wheel-speed tracking and yaw target/actual are visible together.
+- Irregular arcs are safer as RAM teach/replay points first, before continuous path tracking is added.
+
+## 2026-07-17 - TFT PID menu findings
+
+- Arc v1 does not need a separate new PID parameter group yet. It reuses the existing wheel-speed PID because the first arc controller is only left/right wheel-speed inner loops.
+- A dedicated `Arc Status` page is useful because VOFA requires enabling raw JustFloat output, while TFT can continuously show target/actual wheel speeds during ordinary bench tuning.
+- `Yaw Status` now labels `MOTION_RT_ARC` as `ARC`, so the motion state display no longer collapses arc mode into IDLE.
+
+## 2026-07-17 - Arc control finding
+
+- The wheel-speed feedback is too quantized/noisy for strong speed PID or D-term tuning.
+- For the current chassis, arc testing should prioritize stable fixed left/right PWM ratio plus small feedback correction.
+- `Kd` should stay at 0 unless encoder velocity is filtered more heavily or replaced by more reliable hardware capture.
+
+## 2026-07-17 - Arc asymmetry finding
+
+- Right arcs are repeatable enough to use as the current baseline.
+- Left arcs have acceptable yaw completion but a smaller effective radius/translation than right arcs.
+- The first compensation should reduce left-turn curvature without changing right-turn behavior.
+
+## 2026-07-17 - Teach/replay priority
+
+- Since the target use case is push-once/replay, standard arc tuning only needs to be good enough to support segment replay.
+- Point-to-point replay creates a polygonal path and loses the pushed arc shape.
+- Segment replay using recorded yaw deltas plus `motion arc` should preserve arcs better than turn+drive replay.
+
+## 2026-07-17 - Continuous replay decision
+
+- Segment replay still creates visible pauses because each segment waits for `motion` completion.
+- Continuous tracking should be the preferred path replay v2 because the user prioritizes smooth replay of a pushed curve over exact per-segment completion.
+- Initial continuous tracking should tune lookahead/base PWM/yaw Kp before returning to wheel-speed PID work.
+
+## 2026-07-17 - Path tracking curvature observation
+
+- Logs showed persistent negative heading error around `-10..-15deg`, so the controller knew the target was inside the current heading but was not steering tightly enough.
+- Smaller lookahead and higher yaw gain are the correct first knobs before changing base speed.
+
+## 2026-07-17 - Path capacity finding
+
+- The 64-point record limit was a fixed RAM buffer limit, not an algorithmic limit.
+- Increasing to 160 points costs about 1.9KB total path-point storage, which is acceptable on the current build.
+- If future paths need much more than 160 points, the next step should be adjustable downsampling or flash-backed recording rather than blindly growing RAM.

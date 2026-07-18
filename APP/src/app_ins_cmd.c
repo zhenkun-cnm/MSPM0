@@ -6,6 +6,8 @@
 #include "app_ins.h"
 #include "app_motion.h"
 #include "app_nav.h"
+#include "app_path.h"
+#include "app_test1.h"
 #include "dev_uart_rx.h"
 #include "port_log.h"
 #include "FreeRTOS.h"
@@ -46,11 +48,12 @@ static bool send_ins_cmd(INS_CommandType_t type)
     return true;
 }
 
-static bool send_motion_cmd(Motion_CommandType_t type, float value)
+static bool send_motion_cmd2(Motion_CommandType_t type, float value, float value2)
 {
     Motion_Command_t cmd;
     cmd.type = type;
     cmd.value = value;
+    cmd.value2 = value2;
     cmd.cmd_id = 0U;
 
     if (g_motionCmdQueue == NULL) {
@@ -64,6 +67,11 @@ static bool send_motion_cmd(Motion_CommandType_t type, float value)
     }
 
     return true;
+}
+
+static bool send_motion_cmd(Motion_CommandType_t type, float value)
+{
+    return send_motion_cmd2(type, value, 0.0f);
 }
 
 static bool send_nav_cmd(const Nav_Command_t *cmd)
@@ -84,6 +92,56 @@ static bool send_nav_cmd(const Nav_Command_t *cmd)
 
     return true;
 }
+
+static bool send_path_cmd(Path_CommandType_t type)
+{
+    Path_Command_t cmd;
+    cmd.type = type;
+
+    if (g_pathCmdQueue == NULL) {
+        LOG_RAW("[PATH] error: queue not ready\r\n");
+        return false;
+    }
+
+    if (xQueueSend(g_pathCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
+        LOG_RAW("[PATH] error: queue full\r\n");
+        return false;
+    }
+
+    return true;
+}
+
+#if APP_TEST1_ENABLE
+static const char *test1_cmd_name(Test1_CommandType_t type)
+{
+    switch (type) {
+        case TEST1_CMD_HELP:   return "help";
+        case TEST1_CMD_START:  return "start";
+        case TEST1_CMD_STATUS: return "status";
+        case TEST1_CMD_STOP:   return "stop";
+        default:               return "?";
+    }
+}
+
+static bool send_test1_cmd(Test1_CommandType_t type)
+{
+    Test1_Command_t cmd;
+    cmd.type = type;
+
+    if (g_test1CmdQueue == NULL) {
+        log_printf_internal("[TEST1_CMD] error: queue not ready\r\n");
+        return false;
+    }
+
+    if (xQueueSend(g_test1CmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
+        log_printf_internal("[TEST1_CMD] error: queue full\r\n");
+        return false;
+    }
+
+    log_printf_internal("[TEST1_CMD] queued %s\r\n", test1_cmd_name(type));
+    return true;
+}
+#endif
 
 static bool parse_float_arg(const char *text, float *value)
 {
@@ -134,9 +192,34 @@ static bool parse_three_float_args(const char *text, float *a, float *b, float *
     return end != text;
 }
 
+static bool parse_two_float_args(const char *text, float *a, float *b)
+{
+    char *end = NULL;
+
+    if (text == NULL || a == NULL || b == NULL) {
+        return false;
+    }
+
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *a = strtof(text, &end);
+    if (end == text) {
+        return false;
+    }
+
+    text = end;
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *b = strtof(text, &end);
+    return end != text;
+}
+
 static void parse_line(char *line)
 {
     float value;
+    float value2;
     float x_m;
     float y_m;
     float yaw_deg;
@@ -182,6 +265,12 @@ static void parse_line(char *line)
         } else {
             LOG_RAW("[MOTION_CMD] error: usage motion turn <-180..180>\r\n");
         }
+    } else if (str_prefix(line, "motion arc ")) {
+        if (parse_two_float_args(line + strlen("motion arc "), &value, &value2)) {
+            (void)send_motion_cmd2(MOTION_CMD_ARC, value, value2);
+        } else {
+            LOG_RAW("[MOTION_CMD] error: usage motion arc <radius_m> <-180..180_deg>\r\n");
+        }
     } else if (str_eq(line, "nav help")) {
         memset(&navCmd, 0, sizeof(navCmd));
         navCmd.type = NAV_CMD_HELP;
@@ -214,15 +303,50 @@ static void parse_line(char *line)
         } else {
             LOG_RAW("[NAV_CMD] error: usage nav square <side_m>\r\n");
         }
+    } else if (str_eq(line, "path help")) {
+        (void)send_path_cmd(PATH_CMD_HELP);
+    } else if (str_eq(line, "path status")) {
+        (void)send_path_cmd(PATH_CMD_STATUS);
+    } else if (str_eq(line, "path clear")) {
+        (void)send_path_cmd(PATH_CMD_CLEAR);
+    } else if (str_eq(line, "path record start")) {
+        (void)send_path_cmd(PATH_CMD_RECORD_START);
+    } else if (str_eq(line, "path record stop")) {
+        (void)send_path_cmd(PATH_CMD_RECORD_STOP);
+    } else if (str_eq(line, "path print")) {
+        (void)send_path_cmd(PATH_CMD_PRINT);
+    } else if (str_eq(line, "path replay")) {
+        (void)send_path_cmd(PATH_CMD_REPLAY);
+    } else if (str_eq(line, "path stop")) {
+        (void)send_path_cmd(PATH_CMD_STOP);
+#if APP_TEST1_ENABLE
+    } else if (str_eq(line, "test1 help")) {
+        (void)send_test1_cmd(TEST1_CMD_HELP);
+    } else if (str_eq(line, "test1 start") || str_eq(line, "Test1")) {
+        (void)send_test1_cmd(TEST1_CMD_START);
+    } else if (str_eq(line, "test1 status")) {
+        (void)send_test1_cmd(TEST1_CMD_STATUS);
+    } else if (str_eq(line, "test1 stop")) {
+        (void)send_test1_cmd(TEST1_CMD_STOP);
+#else
+    } else if (str_prefix(line, "test1") || str_eq(line, "Test1")) {
+        LOG_RAW("[TEST1] disabled: set APP_TEST1_ENABLE=1\r\n");
+#endif
     } else if (str_prefix(line, "motion")) {
         LOG_RAW("[MOTION_CMD] unknown: %s\r\n", line);
         LOG_RAW("[MOTION_CMD] try: motion help\r\n");
     } else if (str_prefix(line, "nav")) {
         LOG_RAW("[NAV_CMD] unknown: %s\r\n", line);
         LOG_RAW("[NAV_CMD] try: nav help\r\n");
+    } else if (str_prefix(line, "path")) {
+        LOG_RAW("[PATH] unknown: %s\r\n", line);
+        LOG_RAW("[PATH] try: path help\r\n");
+    } else if (str_prefix(line, "test1")) {
+        LOG_RAW("[TEST1] unknown: %s\r\n", line);
+        LOG_RAW("[TEST1] try: test1 help\r\n");
     } else if (line[0] != '\0') {
         LOG_RAW("[INS_CMD] unknown: %s\r\n", line);
-        LOG_RAW("[INS_CMD] try: ins help, motion help, or nav help\r\n");
+        LOG_RAW("[INS_CMD] try: ins help, motion help, nav help, path help, or test1 help\r\n");
     }
 }
 
@@ -242,7 +366,7 @@ void ins_cmd_task(void *pvParameters)
     }
 
     uart->init(uart);
-    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help / nav help\r\n");
+    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help / nav help / path help / test1 help\r\n");
 
     while (1) {
         uint8_t ch;

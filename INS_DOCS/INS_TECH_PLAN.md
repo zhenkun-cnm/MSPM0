@@ -265,3 +265,156 @@ FWD side -> TURN +90
 
 ### 编译
 Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。剩余 warning 是既有 `LED_PORT` 宏重定义。
+## 2026-07-17 Test1 赛题固定路线
+
+### 模块
+- `APP/inc/app_test1.h`
+- `APP/src/app_test1.c`
+- 宏开关：`APP_TEST1_ENABLE`
+
+### 串口命令
+```text
+test1 help
+test1 start
+test1 status
+test1 stop
+Test1
+```
+
+### 路线
+坐标输入单位为 cm，内部转换为 m：
+```text
+(0.90,  0.00) -> right turn -90
+(0.96, -0.90) -> right turn -90
+(0.04, -0.96) -> right turn -90
+(0.00,  0.00) -> right turn -90
+```
+
+### 状态机
+```text
+IDLE
+TURN_TO_TARGET
+DRIVE_TO_TARGET
+RIGHT_TURN
+DONE
+ERROR
+```
+
+### 运动回执
+Test1 直接使用 motion 的 `cmd_id` 回执机制，cmd_id 前缀为 `0x71000000`，避免和 nav 的命令混淆。
+
+### 编译
+Keil clean rebuild 通过：`0 Error(s), 1 Warning(s)`。`app_test1.c` 已参与编译。
+
+## 2026-07-17 Turn-after-drive diagnostic chain
+
+### Purpose
+The car can reach the first straight target but may stop before the next turn. This update makes the command chain observable from UART without changing route or control parameters.
+
+### Motion hard ACK
+`app_motion.c` now prints these lines through `log_printf_internal()`:
+```text
+[MOTION_ACK] accept cmd_id=... type=FWD/TURN value=...
+[MOTION_ACK] reject cmd_id=... type=FWD/TURN value=... reason=...
+[MOTION_ACK] done cmd_id=... result=...
+```
+
+### Test1 step echo
+`app_test1.c` now prints state transitions:
+```text
+[TEST1_STEP] drive done, enter RIGHT_TURN
+[TEST1_STEP] send right turn cmd_id=... yaw_delta=-90.0
+[TEST1_STEP] right turn done
+```
+
+### NAV square step echo
+`app_nav.c` now prints state transitions:
+```text
+[NAV_STEP] square drive done, enter square turn
+[NAV_STEP] send square turn cmd_id=... yaw_delta=+90.0
+[NAV_STEP] square turn done
+```
+
+### Diagnosis rules
+- No `send right turn`: upper state machine did not issue the next command.
+- `send right turn` but no `MOTION_ACK accept type=TURN`: motion rejected or did not receive the turn command.
+- `MOTION_ACK accept type=TURN` but no physical turn: inspect TB6612 and single-wheel turn motor command path.
+- `accept` and `done` without physical turn: inspect yaw completion condition and IMU yaw validity.
+
+### Build
+Keil clean rebuild result: `0 Error(s), 1 Warning(s)`. The warning is the existing `LED_PORT` macro redefinition.
+
+## 2026-07-17 Arc motion v1
+
+### Command
+```text
+motion arc <radius_m> <angle_deg>
+```
+
+Examples:
+```text
+motion arc 0.50 90
+motion arc 0.50 -90
+motion arc 0.40 180
+```
+
+### Control loops
+Arc v1 uses one control layer: left/right wheel-speed PID inner loops.
+
+```text
+radius + angle
+  -> target_left_mps / target_right_mps
+  -> wheel-speed PID
+  -> left/right PWM
+```
+
+IMU yaw is only the completion condition:
+```text
+target_yaw = start_yaw + angle_deg
+done when abs(target_yaw - actual_yaw) <= 3deg
+```
+
+There is no yaw outer-loop PID and no path lateral-error PID in v1.
+
+### VOFA JustFloat
+When `LOG_PRINT_PID_ENABLE=1`, arc mode outputs 6 JustFloat channels:
+```text
+Ch0 target_left_mps
+Ch1 actual_left_mps
+Ch2 target_right_mps
+Ch3 actual_right_mps
+Ch4 target_yaw_deg
+Ch5 actual_yaw_deg
+```
+
+### Limits
+```text
+radius: 0.15m..2.00m
+angle:  +/-5deg..+/-180deg
+center speed: 0.10m/s
+```
+
+## 2026-07-17 Path teach/replay v1
+
+### Commands
+```text
+path help
+path status
+path clear
+path record start
+path record stop
+path print
+path replay
+path stop
+```
+
+### Behavior
+- Stores up to 64 points in RAM.
+- During recording, saves a point when distance changes by at least 0.05m or yaw changes by at least 5deg.
+- Replay uses discrete point following: turn to target point, drive to target point, then advance.
+- Replay uses motion `cmd_id` ACK/done tracking like NAV/Test1.
+- Before replay, place the car back at the recorded start and run `ins reset`; recorded points are relative to that start pose.
+- No Flash format change and no continuous path tracking in v1.
+
+### Build
+Keil clean rebuild passed with `0 Error(s), 1 Warning(s)`. `app_path.c` compiled. The warning is the existing `LED_PORT` macro redefinition.

@@ -203,3 +203,9 @@ start_task:
 - The 64-point record limit was a fixed RAM buffer limit, not an algorithmic limit.
 - Increasing to 160 points costs about 1.9KB total path-point storage, which is acceptable on the current build.
 - If future paths need much more than 160 points, the next step should be adjustable downsampling or flash-backed recording rather than blindly growing RAM.
+
+## 2026-07-18 - Path replay early-finish finding
+
+- Long routes can pass physically near their final point before the logical replay index reaches the route tail.
+- Therefore continuous replay completion must be gated by both final-point distance and replay progress.
+- The current guard allows final-distance completion only once `replay_index >= s_pathCount - 3`.

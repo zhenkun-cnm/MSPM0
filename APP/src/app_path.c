@@ -6,6 +6,7 @@
 #include "app_ins.h"
 #include "app_motion.h"
 #include "app_tb6612.h"
+#include "dev_flash.h"
 #include "port_log.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -15,7 +16,7 @@
 #include <string.h>
 
 #define PATH_TASK_PERIOD_MS          50U
-#define PATH_MAX_POINTS              160U
+#define PATH_MAX_POINTS              500U
 #define PATH_RECORD_MIN_DIST_M       0.05f
 #define PATH_RECORD_MIN_YAW_DEG      5.0f
 #define PATH_POS_TOL_M               0.05f
@@ -31,6 +32,7 @@
 #define PATH_DEG_TO_RAD              0.017453292519943295f
 #define PATH_TRACK_LOOKAHEAD_M       0.10f
 #define PATH_TRACK_COMPLETE_DIST_M   0.06f
+#define PATH_TRACK_DONE_INDEX_BACKOFF 3U
 #define PATH_TRACK_BASE_PWM          16.0f
 #define PATH_TRACK_YAW_KP            0.35f
 #define PATH_TRACK_TRIM_MAX          8.0f
@@ -38,6 +40,12 @@
 #define PATH_TRACK_PWM_MAX           30.0f
 #define PATH_TRACK_PWM_SLEW          2.0f
 #define PATH_TRACK_LOG_PERIOD_MS     500U
+#define PATH_FLASH_START_ADDR        0x000F0000UL
+#define PATH_FLASH_SECTOR_SIZE       4096UL
+#define PATH_FLASH_SECTOR_COUNT      2U
+#define PATH_FLASH_BYTES             (PATH_FLASH_SECTOR_SIZE * PATH_FLASH_SECTOR_COUNT)
+#define PATH_FLASH_MAGIC             0x48545052UL /* "RPTH" little-endian */
+#define PATH_FLASH_VERSION           1U
 
 QueueHandle_t g_pathCmdQueue = NULL;
 
@@ -68,12 +76,24 @@ typedef struct {
     TickType_t motion_cmd_tick;
     uint16_t track_target_index;
     float track_last_dist_m;
+    float track_last_final_dist_m;
     float track_last_heading_error_deg;
     int16_t track_last_left_pwm;
     int16_t track_last_right_pwm;
     TickType_t track_last_log_tick;
+    TickType_t track_near_final_log_tick;
     bool track_motor_started;
 } Path_Runtime_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t point_size;
+    uint16_t max_points;
+    uint16_t count;
+    uint32_t data_bytes;
+    uint32_t checksum;
+} Path_FlashHeader_t;
 
 static Path_Point_t s_pathPoints[PATH_MAX_POINTS];
 static uint16_t s_pathCount = 0U;
@@ -344,6 +364,226 @@ static bool path_add_point(const INS_Pose_t *pose)
     return true;
 }
 
+static bool path_flash_probe(DevFlash **out_flash)
+{
+    DevFlash *flash;
+    DevFlash_JEDECID_t id;
+
+    if (out_flash == NULL) {
+        return false;
+    }
+
+    flash = GetFlash();
+    if (flash == NULL) {
+        LOG_RAW("[PATH_FLASH] error: flash handle NULL\r\n");
+        return false;
+    }
+
+    flash->init(flash);
+    if (!flash->readJEDECID(flash, &id) ||
+        id.manufacturer != 0xEF ||
+        id.memoryType != 0x40) {
+        LOG_RAW("[PATH_FLASH] error: JEDEC invalid\r\n");
+        return false;
+    }
+
+    *out_flash = flash;
+    return true;
+}
+
+static uint32_t path_checksum_bytes(const uint8_t *data, uint32_t len)
+{
+    uint32_t hash = 2166136261UL;
+    uint32_t i;
+
+    for (i = 0U; i < len; i++) {
+        hash ^= (uint32_t)data[i];
+        hash *= 16777619UL;
+    }
+
+    return hash;
+}
+
+static bool path_flash_program_bytes(DevFlash *flash,
+                                     uint32_t addr,
+                                     const uint8_t *data,
+                                     uint32_t len)
+{
+    uint32_t offset = 0U;
+    uint32_t page_left;
+    uint16_t chunk;
+
+    if (flash == NULL || data == NULL) {
+        return false;
+    }
+
+    while (offset < len) {
+        page_left = 256UL - ((addr + offset) & 0xFFUL);
+        chunk = (uint16_t)(len - offset);
+        if ((uint32_t)chunk > page_left) {
+            chunk = (uint16_t)page_left;
+        }
+        if (chunk > 256U) {
+            chunk = 256U;
+        }
+
+        if (!flash->pageProgram(flash, addr + offset, data + offset, chunk)) {
+            return false;
+        }
+        offset += (uint32_t)chunk;
+    }
+
+    return true;
+}
+
+static bool path_is_active(const Path_Runtime_t *rt)
+{
+    return rt != NULL &&
+           (rt->state == PATH_STATE_RECORDING ||
+            rt->state == PATH_STATE_REPLAY_TURN ||
+            rt->state == PATH_STATE_REPLAY_DRIVE ||
+            rt->state == PATH_STATE_REPLAY_SEGMENT ||
+            rt->state == PATH_STATE_REPLAY_TRACK);
+}
+
+static void path_save_to_flash(const Path_Runtime_t *rt)
+{
+    DevFlash *flash;
+    Path_FlashHeader_t header;
+    uint32_t data_bytes;
+    uint32_t total_bytes;
+    uint32_t i;
+
+    if (path_is_active(rt)) {
+        LOG_RAW("[PATH_FLASH] error: stop record/replay before save\r\n");
+        return;
+    }
+    if (s_pathCount < 2U) {
+        LOG_RAW("[PATH_FLASH] error: need at least 2 points\r\n");
+        return;
+    }
+
+    data_bytes = (uint32_t)s_pathCount * (uint32_t)sizeof(Path_Point_t);
+    total_bytes = (uint32_t)sizeof(header) + data_bytes;
+    if (total_bytes > PATH_FLASH_BYTES) {
+        LOG_RAW("[PATH_FLASH] error: path too large bytes=%lu\r\n",
+                (unsigned long)total_bytes);
+        return;
+    }
+
+    if (!path_flash_probe(&flash)) {
+        return;
+    }
+
+    memset(&header, 0, sizeof(header));
+    header.magic = PATH_FLASH_MAGIC;
+    header.version = PATH_FLASH_VERSION;
+    header.point_size = (uint16_t)sizeof(Path_Point_t);
+    header.max_points = PATH_MAX_POINTS;
+    header.count = s_pathCount;
+    header.data_bytes = data_bytes;
+    header.checksum = path_checksum_bytes((const uint8_t *)s_pathPoints, data_bytes);
+
+    LOG_RAW("[PATH_FLASH] save start addr=0x%08lX count=%u bytes=%lu\r\n",
+            (unsigned long)PATH_FLASH_START_ADDR,
+            (unsigned)s_pathCount,
+            (unsigned long)total_bytes);
+
+    for (i = 0U; i < PATH_FLASH_SECTOR_COUNT; i++) {
+        if (!flash->sectorErase(flash,
+                                PATH_FLASH_START_ADDR + (i * PATH_FLASH_SECTOR_SIZE))) {
+            LOG_RAW("[PATH_FLASH] error: erase failed sector=%lu\r\n",
+                    (unsigned long)i);
+            return;
+        }
+    }
+
+    if (!path_flash_program_bytes(flash,
+                                  PATH_FLASH_START_ADDR,
+                                  (const uint8_t *)&header,
+                                  (uint32_t)sizeof(header)) ||
+        !path_flash_program_bytes(flash,
+                                  PATH_FLASH_START_ADDR + (uint32_t)sizeof(header),
+                                  (const uint8_t *)s_pathPoints,
+                                  data_bytes)) {
+        LOG_RAW("[PATH_FLASH] error: write failed\r\n");
+        return;
+    }
+
+    LOG_RAW("[PATH_FLASH] save ok count=%u checksum=0x%08lX\r\n",
+            (unsigned)s_pathCount,
+            (unsigned long)header.checksum);
+}
+
+static void path_load_from_flash(Path_Runtime_t *rt)
+{
+    DevFlash *flash;
+    Path_FlashHeader_t header;
+    uint32_t checksum;
+
+    if (path_is_active(rt)) {
+        LOG_RAW("[PATH_FLASH] error: stop record/replay before load\r\n");
+        return;
+    }
+
+    if (!path_flash_probe(&flash)) {
+        return;
+    }
+
+    if (!flash->read(flash,
+                     PATH_FLASH_START_ADDR,
+                     (uint8_t *)&header,
+                     (uint16_t)sizeof(header))) {
+        LOG_RAW("[PATH_FLASH] error: header read failed\r\n");
+        return;
+    }
+
+    if (header.magic != PATH_FLASH_MAGIC ||
+        header.version != PATH_FLASH_VERSION ||
+        header.point_size != sizeof(Path_Point_t) ||
+        header.count > PATH_MAX_POINTS ||
+        header.count < 2U ||
+        header.data_bytes != ((uint32_t)header.count * (uint32_t)sizeof(Path_Point_t))) {
+        LOG_RAW("[PATH_FLASH] error: no valid path in flash\r\n");
+        return;
+    }
+
+    if (((uint32_t)sizeof(header) + header.data_bytes) > PATH_FLASH_BYTES) {
+        LOG_RAW("[PATH_FLASH] error: stored path too large\r\n");
+        return;
+    }
+
+    memset(s_pathPoints, 0, sizeof(s_pathPoints));
+    if (!flash->read(flash,
+                     PATH_FLASH_START_ADDR + (uint32_t)sizeof(header),
+                     (uint8_t *)s_pathPoints,
+                     (uint16_t)header.data_bytes)) {
+        s_pathCount = 0U;
+        LOG_RAW("[PATH_FLASH] error: data read failed\r\n");
+        return;
+    }
+
+    checksum = path_checksum_bytes((const uint8_t *)s_pathPoints, header.data_bytes);
+    if (checksum != header.checksum) {
+        memset(s_pathPoints, 0, sizeof(s_pathPoints));
+        s_pathCount = 0U;
+        LOG_RAW("[PATH_FLASH] error: checksum mismatch got=0x%08lX expect=0x%08lX\r\n",
+                (unsigned long)checksum,
+                (unsigned long)header.checksum);
+        return;
+    }
+
+    s_pathCount = header.count;
+    rt->state = PATH_STATE_IDLE;
+    rt->replay_index = 0U;
+    rt->track_target_index = 0U;
+    path_reset_motion_wait(rt);
+
+    LOG_RAW("[PATH_FLASH] load ok count=%u checksum=0x%08lX\r\n",
+            (unsigned)s_pathCount,
+            (unsigned long)checksum);
+}
+
 static void path_print_help(void)
 {
     LOG_RAW("[PATH] commands:\r\n");
@@ -355,17 +595,20 @@ static void path_print_help(void)
     LOG_RAW("  path print\r\n");
     LOG_RAW("  path replay\r\n");
     LOG_RAW("  path stop\r\n");
+    LOG_RAW("  path save\r\n");
+    LOG_RAW("  path load\r\n");
 }
 
 static void path_print_status(const Path_Runtime_t *rt)
 {
-    LOG_RAW("[PATH] state=%s count=%u replay=%u/%u target=%u dist=%.3f herr=%+.1f pwm L=%d R=%d wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
+    LOG_RAW("[PATH] state=%s count=%u replay=%u/%u target=%u dist=%.3f final=%.3f herr=%+.1f pwm L=%d R=%d wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
             path_state_name(rt->state),
             (unsigned)s_pathCount,
             (unsigned)(rt->replay_index + 1U),
             (unsigned)s_pathCount,
             (unsigned)rt->track_target_index,
             rt->track_last_dist_m,
+            rt->track_last_final_dist_m,
             rt->track_last_heading_error_deg,
             (int)rt->track_last_left_pwm,
             (int)rt->track_last_right_pwm,
@@ -399,6 +642,7 @@ static void path_enter_error(Path_Runtime_t *rt, const char *reason)
     rt->track_motor_started = false;
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
+    rt->track_last_final_dist_m = 0.0f;
     LOG_RAW("[PATH] error: %s\r\n", reason);
 }
 
@@ -445,10 +689,12 @@ static void path_start_replay(Path_Runtime_t *rt)
     rt->replay_index = 1U;
     rt->track_target_index = 1U;
     rt->track_last_dist_m = 0.0f;
+    rt->track_last_final_dist_m = 0.0f;
     rt->track_last_heading_error_deg = 0.0f;
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
     rt->track_last_log_tick = 0U;
+    rt->track_near_final_log_tick = 0U;
     rt->track_motor_started = false;
     path_reset_motion_wait(rt);
     LOG_RAW("[PATH] replay start count=%u mode=continuous_track\r\n", (unsigned)s_pathCount);
@@ -463,6 +709,7 @@ static void path_stop(Path_Runtime_t *rt)
     rt->track_motor_started = false;
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
+    rt->track_last_final_dist_m = 0.0f;
     LOG_RAW("[PATH] stop ok\r\n");
 }
 
@@ -502,6 +749,12 @@ static void path_handle_command(Path_Runtime_t *rt, const Path_Command_t *cmd)
             break;
         case PATH_CMD_STOP:
             path_stop(rt);
+            break;
+        case PATH_CMD_SAVE:
+            path_save_to_flash(rt);
+            break;
+        case PATH_CMD_LOAD:
+            path_load_from_flash(rt);
             break;
         default:
             LOG_RAW("[PATH] error: bad command\r\n");
@@ -577,6 +830,8 @@ static void path_update_track(Path_Runtime_t *rt)
     float right_pwm_f;
     int16_t left_pwm;
     int16_t right_pwm;
+    uint16_t done_min_index;
+    bool near_final;
 
     if (rt->state != PATH_STATE_REPLAY_TRACK) {
         return;
@@ -593,7 +848,12 @@ static void path_update_track(Path_Runtime_t *rt)
 
     final = &s_pathPoints[s_pathCount - 1U];
     final_dist = path_distance_to_point(&pose, final);
-    if (final_dist <= PATH_TRACK_COMPLETE_DIST_M) {
+    rt->track_last_final_dist_m = final_dist;
+    done_min_index = (s_pathCount > PATH_TRACK_DONE_INDEX_BACKOFF) ?
+                     (uint16_t)(s_pathCount - PATH_TRACK_DONE_INDEX_BACKOFF) :
+                     (uint16_t)(s_pathCount - 1U);
+    near_final = final_dist <= PATH_TRACK_COMPLETE_DIST_M;
+    if (near_final && rt->replay_index >= done_min_index) {
         path_track_stop_motors();
         rt->track_motor_started = false;
         rt->track_last_left_pwm = 0;
@@ -607,6 +867,17 @@ static void path_update_track(Path_Runtime_t *rt)
                 pose.y_m,
                 pose.yaw_deg);
         return;
+    } else if (near_final) {
+        now = xTaskGetTickCount();
+        if (rt->track_near_final_log_tick == 0U ||
+            ((uint32_t)((now - rt->track_near_final_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
+            rt->track_near_final_log_tick = now;
+            log_printf_internal("[PATH_TRACK] near final ignored idx=%u/%u final_dist=%.3f done_idx=%u\r\n",
+                                (unsigned)rt->replay_index,
+                                (unsigned)s_pathCount,
+                                final_dist,
+                                (unsigned)done_min_index);
+        }
     }
 
     while (rt->replay_index < (s_pathCount - 1U)) {

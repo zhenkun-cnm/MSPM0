@@ -1,11 +1,8 @@
 /**
  * @file    app_init.c
- * @brief   App 层初始化与启动实现
- * @note    四层解耦架构 - App 层
- *          include 链: dev_led.h / port_log.h / FreeRTOS.h
- *          禁止: ti_msp_dl_config.h / DL_GPIO_* / 寄存器操作
+ * @brief   App layer initialization and task startup.
  */
- 
+
 #include "app_init.h"
 #include "app_menu.h"
 #include "app_button.h"
@@ -17,23 +14,34 @@
 #include "app_motion.h"
 #include "app_nav.h"
 #include "app_path.h"
+#include "app_stack_monitor.h"
 #include "app_test1.h"
 #include "dev_led.h"
 #include "dev_encoder.h"
 #include "port_log.h"
 #include "port_imu.h"
 #include "port_lis3mdl.h"
-#include "app_imu.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
 #include <stdio.h>
-/* 编码器→菜单事件队列定义（声明见 app_menu.h） */
+
+#define START_TASK_STACK_WORDS       256U
+#define ENCODER_TASK_STACK_WORDS     96U
+#define TFT_TASK_STACK_WORDS         256U
+#define TB6612_TASK_STACK_WORDS      96U
+#define MOTOR_ENC_TASK_STACK_WORDS   128U
+#define INS_TASK_STACK_WORDS         288U
+#define INS_CMD_TASK_STACK_WORDS     160U
+#define MOTION_TASK_STACK_WORDS      192U
+#define NAV_TASK_STACK_WORDS         160U
+#define PATH_TASK_STACK_WORDS        384U
+#define FLASH_TASK_STACK_WORDS       192U
+#define TEST1_TASK_STACK_WORDS       384U
+
 QueueHandle_t g_menuEvtQueue = NULL;
- 
-/* 外部引用的应用任务 */
-// extern void led_task(void *pvParameters);
+
 extern void encoder_task(void *pvParameters);
 extern void flash_init_task(void *pvParameters);
 extern void tft_task(void *pvParameters);
@@ -47,52 +55,57 @@ extern void path_task(void *pvParameters);
 #if APP_TEST1_ENABLE
 extern void test1_task(void *pvParameters);
 #endif
- 
-/* 任务句柄 */
-static TaskHandle_t s_startTaskHandle;
-// static TaskHandle_t s_ledTaskHandle;
-static TaskHandle_t s_encoderTaskHandle;
-// static TaskHandle_t s_buttonTaskHandle;
- 
-/* 本地函数 */
+
+static TaskHandle_t s_startTaskHandle = NULL;
+static TaskHandle_t s_encoderTaskHandle = NULL;
+static TaskHandle_t s_tftTaskHandle = NULL;
+static TaskHandle_t s_tb6612TaskHandle = NULL;
+static TaskHandle_t s_motorEncoderTaskHandle = NULL;
+static TaskHandle_t s_insTaskHandle = NULL;
+static TaskHandle_t s_insCmdTaskHandle = NULL;
+static TaskHandle_t s_motionTaskHandle = NULL;
+static TaskHandle_t s_navTaskHandle = NULL;
+static TaskHandle_t s_pathTaskHandle = NULL;
+static TaskHandle_t s_flashTaskHandle = NULL;
+#if APP_TEST1_ENABLE
+static TaskHandle_t s_test1TaskHandle = NULL;
+#endif
+
 static void start_task(void *pvParameters);
- 
-/* ============ app_init / app_start ============ */
- 
+
 void app_init(void)
 {
-    xTaskCreate(
-        start_task,
-        "start_task",
-        512,
-        NULL,
-        1,
-        &s_startTaskHandle
-    );
+    BaseType_t status = xTaskCreate(start_task,
+                                    "start_task",
+                                    START_TASK_STACK_WORDS,
+                                    NULL,
+                                    1,
+                                    &s_startTaskHandle);
+    if (status == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_START,
+                                   s_startTaskHandle,
+                                   START_TASK_STACK_WORDS);
+    }
 }
- 
+
 void app_start(void)
 {
     vTaskStartScheduler();
 }
- 
-/* ============ start_task ============ */
- 
+
 static void start_task(void *pvParameters)
 {
     (void)pvParameters;
 
     setbuf(stdout, NULL);
- 
+
     taskENTER_CRITICAL();
- 
-    /* 先创建编码器→菜单事件队列（必须在 encoder_task / tft_task 之前） */
+
     g_menuEvtQueue = xQueueCreate(MENU_EVT_QUEUE_LEN, sizeof(DevEncoder_Event_t));
     if (g_menuEvtQueue == NULL) {
         LOG_ERROR("[INIT] menu event queue create failed!\r\n");
     }
- 
-    /* 创建菜单→电机命令队列（必须在 tft_task / tb6612_task 之前） */
+
     g_motorCmdQueue = xQueueCreate(MOTOR_CMD_QUEUE_LEN, sizeof(MotorCmd));
     if (g_motorCmdQueue == NULL) {
         LOG_ERROR("[INIT] motor cmd queue create failed!\r\n");
@@ -129,154 +142,167 @@ static void start_task(void *pvParameters)
         LOG_ERROR("[INIT] test1 cmd queue create failed!\r\n");
     }
 #endif
- 
-    /* 创建编码器应用任务（内部包含 5ms 周期轮询） */
-    xTaskCreate(
-        encoder_task,
-        "encoder_task",
-        128,
-        NULL,
-        2,
-        &s_encoderTaskHandle
-    );
 
-    /* 创建 TFT 显示任务 */
-    xTaskCreate(
-        tft_task,
-        "tft_task",
-        256,
-        NULL,
-        1,
-        NULL
-    );
-    LOG_INFO("  TFT task created (prio=1)\r\n");
- 
-    /* 创建 TB6612 电机控制任务 */
-    xTaskCreate(
-        tb6612_task,
-        "tb6612",
-        128,
-        NULL,
-        3,
-        NULL
-    );
-    LOG_INFO("  TB6612 task created (prio=3)\r\n");
- 
-    /* 创建电机编码器采集任务 (每 10ms) */
-    xTaskCreate(
-        motor_encoder_task,
-        "motor_enc",
-        256,
-        NULL,
-        3,
-        NULL    
-    );
-    LOG_INFO("  Motor encoder task created (prio=3)\r\n");
+    if (xTaskCreate(encoder_task,
+                    "encoder_task",
+                    ENCODER_TASK_STACK_WORDS,
+                    NULL,
+                    2,
+                    &s_encoderTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_ENCODER,
+                                   s_encoderTaskHandle,
+                                   ENCODER_TASK_STACK_WORDS);
+    } else {
+        LOG_ERROR("[INIT] encoder task create failed!\r\n");
+    }
 
-    /* 创建 IMU 数据采集任务 (ICM-20608 + LIS3MDLRT, 每 100ms) */
+    if (xTaskCreate(tft_task,
+                    "tft_task",
+                    TFT_TASK_STACK_WORDS,
+                    NULL,
+                    1,
+                    &s_tftTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_TFT,
+                                   s_tftTaskHandle,
+                                   TFT_TASK_STACK_WORDS);
+        LOG_INFO("  TFT task created (prio=1)\r\n");
+    } else {
+        LOG_ERROR("[INIT] TFT task create failed!\r\n");
+    }
+
+    if (xTaskCreate(tb6612_task,
+                    "tb6612",
+                    TB6612_TASK_STACK_WORDS,
+                    NULL,
+                    3,
+                    &s_tb6612TaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_TB6612,
+                                   s_tb6612TaskHandle,
+                                   TB6612_TASK_STACK_WORDS);
+        LOG_INFO("  TB6612 task created (prio=3)\r\n");
+    } else {
+        LOG_ERROR("[INIT] TB6612 task create failed!\r\n");
+    }
+
+    if (xTaskCreate(motor_encoder_task,
+                    "motor_enc",
+                    MOTOR_ENC_TASK_STACK_WORDS,
+                    NULL,
+                    3,
+                    &s_motorEncoderTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_MOTOR_ENC,
+                                   s_motorEncoderTaskHandle,
+                                   MOTOR_ENC_TASK_STACK_WORDS);
+        LOG_INFO("  Motor encoder task created (prio=3)\r\n");
+    } else {
+        LOG_ERROR("[INIT] motor encoder task create failed!\r\n");
+    }
+
     app_imu_start();
 
-    BaseType_t insCreateOk = xTaskCreate(
-        ins_task,
-        "ins",
-        400,
-        NULL,
-        4,
-        NULL
-    );
-    if (insCreateOk != pdPASS) {
-        LOG_ERROR("[INIT] INS task create failed!\r\n");
-    } else {
+    if (xTaskCreate(ins_task,
+                    "ins",
+                    INS_TASK_STACK_WORDS,
+                    NULL,
+                    4,
+                    &s_insTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_INS,
+                                   s_insTaskHandle,
+                                   INS_TASK_STACK_WORDS);
         LOG_INFO("  INS task created (prio=4)\r\n");
+    } else {
+        LOG_ERROR("[INIT] INS task create failed!\r\n");
     }
 
-    BaseType_t insCmdCreateOk = xTaskCreate(
-        ins_cmd_task,
-        "ins_cmd",
-        256,
-        NULL,
-        1,
-        NULL
-    );
-    if (insCmdCreateOk != pdPASS) {
-        LOG_ERROR("[INIT] INS cmd task create failed!\r\n");
-    } else {
+    if (xTaskCreate(ins_cmd_task,
+                    "ins_cmd",
+                    INS_CMD_TASK_STACK_WORDS,
+                    NULL,
+                    1,
+                    &s_insCmdTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_INS_CMD,
+                                   s_insCmdTaskHandle,
+                                   INS_CMD_TASK_STACK_WORDS);
         LOG_INFO("  INS cmd task created (prio=1)\r\n");
+    } else {
+        LOG_ERROR("[INIT] INS cmd task create failed!\r\n");
     }
 
-    BaseType_t motionCreateOk = xTaskCreate(
-        motion_task,
-        "motion",
-        300,
-        NULL,
-        3,
-        NULL
-    );
-    if (motionCreateOk != pdPASS) {
-        LOG_ERROR("[INIT] motion task create failed!\r\n");
-    } else {
+    if (xTaskCreate(motion_task,
+                    "motion",
+                    MOTION_TASK_STACK_WORDS,
+                    NULL,
+                    3,
+                    &s_motionTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_MOTION,
+                                   s_motionTaskHandle,
+                                   MOTION_TASK_STACK_WORDS);
         LOG_INFO("  Motion task created (prio=3)\r\n");
+    } else {
+        LOG_ERROR("[INIT] motion task create failed!\r\n");
     }
 
-    BaseType_t navCreateOk = xTaskCreate(
-        nav_task,
-        "nav",
-        384,
-        NULL,
-        2,
-        NULL
-    );
-    if (navCreateOk != pdPASS) {
-        LOG_ERROR("[INIT] nav task create failed!\r\n");
-    } else {
+    if (xTaskCreate(nav_task,
+                    "nav",
+                    NAV_TASK_STACK_WORDS,
+                    NULL,
+                    2,
+                    &s_navTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_NAV,
+                                   s_navTaskHandle,
+                                   NAV_TASK_STACK_WORDS);
         LOG_INFO("  NAV task created (prio=2)\r\n");
+    } else {
+        LOG_ERROR("[INIT] nav task create failed!\r\n");
     }
 
-    BaseType_t pathCreateOk = xTaskCreate(
-        path_task,
-        "path",
-        384,
-        NULL,
-        2,
-        NULL
-    );
-    if (pathCreateOk != pdPASS) {
-        LOG_ERROR("[INIT] path task create failed!\r\n");
-    } else {
+    if (xTaskCreate(path_task,
+                    "path",
+                    PATH_TASK_STACK_WORDS,
+                    NULL,
+                    2,
+                    &s_pathTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_PATH,
+                                   s_pathTaskHandle,
+                                   PATH_TASK_STACK_WORDS);
         LOG_INFO("  PATH task created (prio=2)\r\n");
+    } else {
+        LOG_ERROR("[INIT] path task create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE
-    BaseType_t test1CreateOk = xTaskCreate(
-        test1_task,
-        "test1",
-        384,
-        NULL,
-        2,
-        NULL
-    );
-    if (test1CreateOk != pdPASS) {
-        LOG_ERROR("[INIT] test1 task create failed!\r\n");
-    } else {
+    if (xTaskCreate(test1_task,
+                    "test1",
+                    TEST1_TASK_STACK_WORDS,
+                    NULL,
+                    2,
+                    &s_test1TaskHandle) == pdPASS) {
         LOG_INFO("  TEST1 task created (prio=2)\r\n");
+    } else {
+        LOG_ERROR("[INIT] test1 task create failed!\r\n");
     }
 #endif
 
-    /* 创建 Flash 开机自检任务 (W25Q64, 最低优先级, 完成后自动删除) */
-    xTaskCreate(
-        flash_init_task,
-        "flash_test",
-        256,
-        NULL,
-        1,
-        NULL
-    );
-    LOG_INFO("  Flash test task created (prio=1)\r\n");
+    if (xTaskCreate(flash_init_task,
+                    "flash_test",
+                    FLASH_TASK_STACK_WORDS,
+                    NULL,
+                    1,
+                    &s_flashTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_FLASH,
+                                   s_flashTaskHandle,
+                                   FLASH_TASK_STACK_WORDS);
+        LOG_INFO("  Flash test task created (prio=1)\r\n");
+    } else {
+        LOG_ERROR("[INIT] flash test task create failed!\r\n");
+    }
+
+    app_stack_monitor_start();
 
     LOG_INFO("====================================\r\n");
- 
+
     taskEXIT_CRITICAL();
- 
-    /* 删除开始任务自身（必须在临界区之外，否则调度器异常） */
+
+    app_stack_monitor_clear_task(APP_STACK_MON_START);
     vTaskDelete(NULL);
 }

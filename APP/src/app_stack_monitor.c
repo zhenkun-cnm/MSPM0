@@ -1,35 +1,82 @@
 /**
  * @file    app_stack_monitor.c
- * @brief   每 10s 打印所有任务的栈峰值使用率
+ * @brief   Print FreeRTOS task stack high-water marks every 10 seconds.
  */
 #include "app_stack_monitor.h"
+#include "portable.h"
 #include "port_log.h"
-#include "FreeRTOS.h"
-#include "task.h"
+#include "timers.h"
 #include <stdint.h>
 
-#define MONITOR_PERIOD_MS         10000U
-#define MONITOR_STACK_DEPTH        200U
+#define MONITOR_PERIOD_MS          10000U
+#define MONITOR_STACK_DEPTH        192U
 
-/* ──────── 各任务栈大小（words）── 与 xTaskCreate 中保持一致 ──────── */
-static const struct {
+typedef struct {
     const char *name;
-    uint16_t    stackWords;
-} s_tasks[] = {
-    { "encoder_task", 128 },
-    { "tft_task",   256 },
-    { "tb6612",     128 },
-    { "motor_enc",  128 },
-    { "imu_task",   512 },
-    { "ins",        512 },
-    { "ins_cmd",    256 },
-    { "motion",     384 },
-    { "flash_init", 256 },
-    { "IDLE",       configMINIMAL_STACK_SIZE },
-    { "Tmr Svc",    configTIMER_TASK_STACK_DEPTH },
+    TaskHandle_t handle;
+    uint16_t stackWords;
+} StackMonEntry;
+
+static StackMonEntry s_tasks[APP_STACK_MON_COUNT] = {
+    [APP_STACK_MON_START]     = { "start_task",   NULL, 256 },
+    [APP_STACK_MON_ENCODER]   = { "encoder_task", NULL, 96 },
+    [APP_STACK_MON_TFT]       = { "tft_task",     NULL, 256 },
+    [APP_STACK_MON_TB6612]    = { "tb6612",       NULL, 96 },
+    [APP_STACK_MON_MOTOR_ENC] = { "motor_enc",    NULL, 128 },
+    [APP_STACK_MON_IMU]       = { "imu_task",     NULL, 448 },
+    [APP_STACK_MON_INS]       = { "ins",          NULL, 288 },
+    [APP_STACK_MON_INS_CMD]   = { "ins_cmd",      NULL, 160 },
+    [APP_STACK_MON_MOTION]    = { "motion",       NULL, 192 },
+    [APP_STACK_MON_NAV]       = { "nav",          NULL, 160 },
+    [APP_STACK_MON_PATH]      = { "path",         NULL, 384 },
+    [APP_STACK_MON_FLASH]     = { "flash_test",   NULL, 192 },
+    [APP_STACK_MON_MONITOR]   = { "stack_mon",    NULL, MONITOR_STACK_DEPTH },
 };
 
-#define MONITOR_TASK_COUNT  (sizeof(s_tasks) / sizeof(s_tasks[0]))
+void app_stack_monitor_set_task(AppStackMon_TaskId id,
+                                TaskHandle_t handle,
+                                uint16_t stackWords)
+{
+    if (id >= APP_STACK_MON_COUNT) {
+        return;
+    }
+
+    s_tasks[id].handle = handle;
+    s_tasks[id].stackWords = stackWords;
+}
+
+void app_stack_monitor_clear_task(AppStackMon_TaskId id)
+{
+    if (id >= APP_STACK_MON_COUNT) {
+        return;
+    }
+
+    s_tasks[id].handle = NULL;
+}
+
+static void print_task_stack(const StackMonEntry *entry)
+{
+    uint32_t remaining;
+    uint32_t total;
+    uint32_t used;
+    uint32_t peakPct;
+
+    if (entry == NULL || entry->handle == NULL || entry->stackWords == 0U) {
+        return;
+    }
+
+    remaining = (uint32_t)uxTaskGetStackHighWaterMark(entry->handle);
+    total = (uint32_t)entry->stackWords;
+    used = (remaining < total) ? (total - remaining) : 0U;
+    peakPct = (used * 100U) / total;
+
+    LOG_RAW("[STACK] %-12s peak=%3lu%% used=%lu/%lu words free=%lu words\r\n",
+            entry->name,
+            (unsigned long)peakPct,
+            (unsigned long)used,
+            (unsigned long)total,
+            (unsigned long)remaining);
+}
 
 static void stack_monitor_task(void *pvParameters)
 {
@@ -42,40 +89,53 @@ static void stack_monitor_task(void *pvParameters)
 
         LOG_RAW("[STACK] ----- Task Stack Usage (peak) -----\r\n");
 
-        for (uint32_t i = 0; i < MONITOR_TASK_COUNT; i++) {
-            TaskHandle_t h = xTaskGetHandle(s_tasks[i].name);
-
-            if (h == NULL) {
-                /* 任务可能尚未创建或已删除（如 encoder_task/flash_init） */
-                continue;
-            }
-
-            uint32_t remaining = (uint32_t)uxTaskGetStackHighWaterMark(h);
-            uint32_t total     = (uint32_t)s_tasks[i].stackWords;
-            uint32_t peakPct   = (total > 0U)
-                                 ? ((total - remaining) * 100U) / total
-                                 : 0U;
-
-            LOG_RAW("[STACK] %-12s  peak=%3lu%%  (%lu/%lu words)\r\n",
-                    s_tasks[i].name,
-                    (unsigned long)peakPct,
-                    (unsigned long)(total - remaining),
-                    (unsigned long)total);
+        for (uint32_t i = 0; i < APP_STACK_MON_COUNT; i++) {
+            print_task_stack(&s_tasks[i]);
         }
+
+        LOG_RAW("[HEAP] free=%lu bytes min_ever=%lu bytes\r\n",
+                (unsigned long)xPortGetFreeHeapSize(),
+                (unsigned long)xPortGetMinimumEverFreeHeapSize());
+
+#if ( INCLUDE_xTaskGetIdleTaskHandle == 1 )
+        {
+            StackMonEntry idle = {
+                "IDLE",
+                xTaskGetIdleTaskHandle(),
+                configMINIMAL_STACK_SIZE
+            };
+            print_task_stack(&idle);
+        }
+#endif
+
+#if ( configUSE_TIMERS == 1 )
+        {
+            StackMonEntry timer = {
+                "Tmr Svc",
+                xTimerGetTimerDaemonTaskHandle(),
+                configTIMER_TASK_STACK_DEPTH
+            };
+            print_task_stack(&timer);
+        }
+#endif
     }
 }
 
 void app_stack_monitor_start(void)
 {
+    TaskHandle_t handle = NULL;
     BaseType_t status = xTaskCreate(stack_monitor_task,
                                     "stack_mon",
                                     MONITOR_STACK_DEPTH,
                                     NULL,
                                     1,
-                                    NULL);
+                                    &handle);
     if (status != pdPASS) {
         LOG_ERROR("[STACK] monitor task create failed\r\n");
     } else {
+        app_stack_monitor_set_task(APP_STACK_MON_MONITOR,
+                                   handle,
+                                   MONITOR_STACK_DEPTH);
         LOG_INFO("[STACK] monitor started, period=%lums\r\n",
                  (unsigned long)MONITOR_PERIOD_MS);
     }

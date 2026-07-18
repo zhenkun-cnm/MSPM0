@@ -132,3 +132,20 @@
 - Changed path count and replay target indexes from 8-bit to 16-bit to avoid overflow above 255.
 - Memory impact is modest: each path point is 12 bytes, so 160 points use 1920 bytes.
 - Keil clean rebuild passed with `0 Error(s), 1 Warning(s)`; RAM summary was `RW-data=192`, `ZI-data=30984`.
+
+## 2026-07-18 - Path replay long-route early-finish guard
+
+- Fixed continuous path replay completing early when the vehicle passes near the final recorded point before tracking most of a long route.
+- Completion now requires both `final_dist <= 0.06m` and replay index within the last 3 recorded points.
+- `path status` now includes `final=<m>` so final-point proximity is visible during replay.
+- Added throttled `[PATH_TRACK] near final ignored ...` logs when final point proximity is ignored because the replay index is still too early.
+- Keil clean rebuild passed with `0 Error(s), 1 Warning(s)`.
+
+## 2026-07-18 - Path capacity 500 and stack trim
+
+- Increased `PATH_MAX_POINTS` to 500, so path RAM storage is about 6000 bytes.
+- Kept FreeRTOS heap at 18KB; reduced startup main stack to `0x0800` to pay for the extra path RAM.
+- Expanded path Flash storage at `0x000F0000` from one 4KB sector to two sectors (8KB total).
+- Trimmed low-usage task stacks based on observed high-water marks; kept TFT unchanged due to missing stack data.
+- Added heap free/min-ever output to stack monitor.
+- Keil clean rebuild passed with `0 Error(s), 1 Warning(s)`.

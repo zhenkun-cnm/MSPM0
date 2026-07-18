@@ -60,7 +60,7 @@
 #define configUSE_TIMERS                        1       // 启用软件定时器
 #define configTIMER_TASK_PRIORITY               ( 4 )   // 定时器任务优先级（设为最高）
 #define configTIMER_QUEUE_LENGTH                ( 10 )  // 定时器命令队列长度
-#define configTIMER_TASK_STACK_DEPTH            ( configMINIMAL_STACK_SIZE * 2 )
+#define configTIMER_TASK_STACK_DEPTH            ( 96 )
 
 /*-----------------------------------------------------------
  * 可选的 API 函数使能 (1: 使能；0: 禁用)
@@ -73,6 +73,7 @@
 #define INCLUDE_vTaskDelayUntil                 1
 #define INCLUDE_vTaskDelay                      1
 #define INCLUDE_uxTaskGetStackHighWaterMark     1
+#define INCLUDE_xTaskGetIdleTaskHandle          1
 #define INCLUDE_xTaskGetSchedulerState          1
 #define INCLUDE_xTimerPendFunctionCall          1
 

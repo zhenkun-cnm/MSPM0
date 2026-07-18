@@ -3,6 +3,7 @@
  * @brief   App layer 9-axis attitude task.
  */
 #include "app_imu.h"
+#include "app_stack_monitor.h"
 #include "imu_ahrs9.h"
 #include "imu_filter.h"
 #include "port_imu.h"
@@ -13,7 +14,7 @@
 #include "semphr.h"
 #include <math.h>
 
-#define IMU_TASK_STACK_SIZE      768
+#define IMU_TASK_STACK_SIZE      448
 #define IMU_TASK_PRIORITY        (4)
 #define IMU_TASK_PERIOD_MS       10
 #define IMU_PRINT_PERIOD_MS      1000
@@ -321,7 +322,13 @@ void app_imu_start(void)
         LOG_RAW("[ATT] IMU mutex create failed\r\n");
         return;
     }
-    xTaskCreate(imu_task, "imu_task",
-                IMU_TASK_STACK_SIZE, NULL,
-                IMU_TASK_PRIORITY, NULL);
+    TaskHandle_t imuHandle = NULL;
+    BaseType_t status = xTaskCreate(imu_task, "imu_task",
+                                      IMU_TASK_STACK_SIZE, NULL,
+                                      IMU_TASK_PRIORITY, &imuHandle);
+    if (status == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_IMU,
+                                   imuHandle,
+                                   IMU_TASK_STACK_SIZE);
+    }
 }

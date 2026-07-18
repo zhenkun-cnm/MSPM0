@@ -1,14 +1,15 @@
 /**
  * @file    app_flash.c
- * @brief   App 层 Flash 验证任务
- * @note    四层解耦架构 - App 层
+ * @brief   App �?Flash 验证任务
+ * @note    四层解耦架�?- App �?
  *          通过 Device 句柄操作 Flash
  *          1. 读取 JEDEC ID
- *          2. 擦除第一页 → 写入 0x01 0x02 0x03 → 读出验证
- *          支持 W25Q64（8MB, EF 40 17）
+ *          2. 擦除第一�?�?写入 0x01 0x02 0x03 �?读出验证
+ *          支持 W25Q64�?MB, EF 40 17�?
  */
 
 #include "app_flash.h"
+#include "app_stack_monitor.h"
 #include "dev_flash.h"
 #include "port_log.h"
 #include "FreeRTOS.h"
@@ -25,11 +26,12 @@ void flash_init_task(void *pvParameters)
     DevFlash *flash = GetFlash();
     if (flash == NULL) {
         LOG_ERROR("[FLASH] Device handle is NULL!\r\n");
+        app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
 
-    /* 初始化 Flash 硬件 */
+    /* 初始�?Flash 硬件 */
     flash->init(flash);
 
     /* ────── Step 1: 读取 JEDEC ID ────── */
@@ -60,15 +62,17 @@ void flash_init_task(void *pvParameters)
         }
     } else {
         LOG_ERROR("[FLASH] Failed to read JEDEC ID!\r\n");
+        app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
 
-    /* ────── Step 2: 擦除第一页 ────── */
+    /* ────── Step 2: 擦除第一�?────── */
     LOG_INFO("  Erasing sector 0x%08lX ...\r\n", (unsigned long)TEST_ADDR);
     if (!flash->sectorErase(flash, TEST_ADDR)) {
         LOG_ERROR("[FLASH] Sector erase FAILED at 0x%08lX!\r\n",
                   (unsigned long)TEST_ADDR);
+        app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
@@ -79,6 +83,7 @@ void flash_init_task(void *pvParameters)
              s_writeData[0], s_writeData[1], s_writeData[2]);
     if (!flash->pageProgram(flash, TEST_ADDR, s_writeData, 3)) {
         LOG_ERROR("[FLASH] Page program FAILED!\r\n");
+        app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
@@ -108,6 +113,7 @@ void flash_init_task(void *pvParameters)
 
     LOG_INFO("====================================\r\n");
 
-    /* 验证完毕，删除自身 */
+    /* 验证完毕，删除自�?*/
+    app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
     vTaskDelete(NULL);
 }

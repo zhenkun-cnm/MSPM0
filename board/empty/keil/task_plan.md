@@ -235,3 +235,31 @@ Next validation:
 - Run `path clear`, `path record start`, and push a longer mixed line/arc path.
 - Confirm `path record stop` reports more than 64 points when the pushed path is long enough.
 - Keep the first long test near 150 points before considering a larger buffer.
+
+## 2026-07-18 - Path replay early-finish guard
+
+Status: implemented and build-verified.
+
+Completed:
+- Added `PATH_TRACK_DONE_INDEX_BACKOFF = 3`.
+- Continuous replay no longer finishes from final-point distance alone unless the replay index is within the last 3 points.
+- Added `final=` to `path status` and `near final ignored` diagnostic logs.
+
+Next validation:
+- Replay the 166-point saved path and confirm it does not stop near `idx=32/166`.
+- Completion should occur only near the route tail.
+
+## 2026-07-18 - Path 500 points and stack trim
+
+Status: implemented and build-verified.
+
+Completed:
+- `PATH_MAX_POINTS = 500`.
+- Main startup stack reduced to `0x0800`; FreeRTOS heap remains 18KB.
+- Path Flash save/load now uses two 4KB sectors.
+- Low-usage task stacks were trimmed; stack monitor now prints heap free/min-ever.
+
+Next validation:
+- Confirm startup has no HardFault.
+- Check stack monitor free words after normal path record/replay/save/load.
+- Record and save a path longer than 330 points.

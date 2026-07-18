@@ -23,7 +23,9 @@ typedef enum {
     PATH_CMD_RECORD_STOP,
     PATH_CMD_PRINT,
     PATH_CMD_REPLAY,
-    PATH_CMD_STOP
+    PATH_CMD_STOP,
+    PATH_CMD_SAVE,
+    PATH_CMD_LOAD
 } Path_CommandType_t;
 
 typedef struct {

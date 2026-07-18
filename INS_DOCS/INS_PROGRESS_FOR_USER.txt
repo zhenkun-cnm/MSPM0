@@ -287,7 +287,7 @@ path replay
 2026-07-18 - 连续路径回放 + W25Q 保存/读取怎么用
 
 问：现在 path record 最多能记录多少点？
-答：已经从 64 点提高到 160 点。目标是至少能采 150 个点。每个点保存 X、Y、YAW 三个 float，所以 160 点大约占 1920 字节 RAM，目前不需要减少其他线程。
+答：已经提高到 500 点。每个点保存 X、Y、YAW 三个 float，所以 500 点大约占 6000 字节 RAM。新增的约 2KB RAM 来自主栈从 0x1000 降到 0x0800，FreeRTOS heap 仍保持 18KB。
 
 问：现在 path replay 是怎么走的？
 答：现在默认是连续路径跟踪，不再按一个个小段停车。回放时 `path_task` 会持续读取 INS 位姿，寻找前视目标点，然后直接输出左右轮 PWM。你之前看到的“停顿明显、折线化”已经改成连续跟踪方式。
@@ -305,7 +305,7 @@ path flash save
 path flash load
 
 问：path save 做什么？
-答：把当前 RAM 里的路径点保存到 W25Q Flash。保存位置是 0x000F0000，单独使用 1 个 4KB 扇区，不覆盖 INS log 的 0x00100000 区域。
+答：把当前 RAM 里的路径点保存到 W25Q Flash。保存位置从 0x000F0000 开始，使用 2 个 4KB 扇区，共 8KB，不覆盖 INS log 的 0x00100000 区域。
 
 问：path load 做什么？
 答：从 W25Q Flash 读取之前保存的路径，并覆盖当前 RAM 里的路径点。读取时会检查 magic、version、点大小、点数量、数据长度和 checksum，防止空 Flash 或坏数据覆盖 RAM。
@@ -375,3 +375,34 @@ path print
 
 问：本次编译结果？
 答：Keil clean rebuild 通过：0 Error(s), 1 Warning(s)。唯一 warning 仍是已有的 LED_PORT 宏重复定义，和 path save/load 无关。
+
+2026-07-18 - 修复长路径 replay 过早点完成
+
+问：为什么 166 个点会在第 32 个点附近停止？
+答：不是 Flash 数据丢了。日志里 `replay start count=166` 说明 RAM 里确实有 166 个点。真正原因是旧完成条件只看“当前位置离最后一个点是否小于 0.06m”。长路径、大圆弧、U 形或 S 弯可能在中途就靠近最后点，于是提前判定完成。
+
+问：现在怎么修？
+答：现在完成条件改成两个条件同时满足：
+1. 离最后一个点小于 0.06m。
+2. replay index 已经推进到最后 3 个点以内。
+
+也就是说，如果车中途靠近终点，但还没跟踪到路径尾部，不会停车。
+
+问：我会看到什么新日志？
+答：如果中途靠近终点但不允许完成，会看到：
+[PATH_TRACK] near final ignored idx=.../... final_dist=... done_idx=...
+
+真正完成时才会看到：
+[PATH] replay done track dist=...
+
+问：path status 多了什么？
+答：`path status` 现在多了 `final=...`，表示当前位置到最终记录点的距离。这个值可以帮助判断是不是“中途接近终点但不该完成”。
+
+问：怎么测试？
+答：用你现在这条 166 点路径：
+path load
+path print
+ins reset
+path replay
+
+期望结果：不应该再在 `idx=32/166` 附近停止，应该继续跟踪到接近尾部后才完成。

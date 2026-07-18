@@ -319,6 +319,10 @@ static void parse_line(char *line)
         (void)send_path_cmd(PATH_CMD_REPLAY);
     } else if (str_eq(line, "path stop")) {
         (void)send_path_cmd(PATH_CMD_STOP);
+    } else if (str_eq(line, "path save") || str_eq(line, "path flash save")) {
+        (void)send_path_cmd(PATH_CMD_SAVE);
+    } else if (str_eq(line, "path load") || str_eq(line, "path flash load")) {
+        (void)send_path_cmd(PATH_CMD_LOAD);
 #if APP_TEST1_ENABLE
     } else if (str_eq(line, "test1 help")) {
         (void)send_test1_cmd(TEST1_CMD_HELP);

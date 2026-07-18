@@ -540,6 +540,11 @@
               <FilePath>..\..\..\APP\src\app_path.c</FilePath>
             </File>
             <File>
+              <FileName>app_stack_monitor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_stack_monitor.c</FilePath>
+            </File>
+            <File>
               <FileName>app_test1.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_test1.c</FilePath>

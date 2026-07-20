@@ -540,6 +540,16 @@
               <FilePath>..\..\..\APP\src\app_path.c</FilePath>
             </File>
             <File>
+              <FileName>app_gray.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_gray.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_gray_line.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_gray_line.c</FilePath>
+            </File>
+            <File>
               <FileName>app_stack_monitor.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_stack_monitor.c</FilePath>
@@ -633,6 +643,11 @@
               <FileName>port_uart_rx.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\port\src\port_uart_rx.c</FilePath>
+            </File>
+            <File>
+              <FileName>port_gray.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_gray.c</FilePath>
             </File>
           </Files>
         </Group>

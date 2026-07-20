@@ -27,22 +27,22 @@
 QueueHandle_t g_navCmdQueue = NULL;
 
 typedef struct {
-    Nav_State_t state;
-    bool square_active;
-    uint8_t square_leg;
-    float square_side_m;
-    float target_x_m;
-    float target_y_m;
-    float target_yaw_deg;
-    float target_heading_deg;
-    float drive_distance_m;
-    float dist_error_m;
-    float yaw_error_deg;
-    uint32_t next_motion_cmd_id;
-    uint32_t waiting_motion_cmd_id;
-    bool motion_cmd_sent;
-    bool motion_accepted;
-    TickType_t motion_cmd_tick;
+    Nav_State_t state;                  /**< 当前导航状态机状态 */
+    bool square_active;                 /**< 是否正在走正方形路径 */
+    uint8_t square_leg;                 /**< 当前走到正方形的第几条边(0~3) */
+    float square_side_m;                /**< 正方形边长，单位 m */
+    float target_x_m;                   /**< goto 目标点 X 坐标，单位 m */
+    float target_y_m;                   /**< goto 目标点 Y 坐标，单位 m */
+    float target_yaw_deg;               /**< 到达目标后最终期望航向角，单位 ° */
+    float target_heading_deg;           /**< 当前段的目标行进方向角，单位 ° */
+    float drive_distance_m;             /**< 当前直行段总距离，单位 m */
+    float dist_error_m;                 /**< 当前位置到目标点的距离误差，单位 m */
+    float yaw_error_deg;                /**< 当前航向角偏差，单位 ° */
+    uint32_t next_motion_cmd_id;        /**< 下一条运动命令的 ID(单调递增) */
+    uint32_t waiting_motion_cmd_id;     /**< 正在等待完成的运动命令 ID */
+    bool motion_cmd_sent;               /**< 是否已向下层发送运动命令 */
+    bool motion_accepted;               /**< 运动命令是否被下层接受 */
+    TickType_t motion_cmd_tick;         /**< 运动命令发送时的系统 tick */
 } Nav_Runtime_t;
 
 static float nav_wrap_180(float deg)
@@ -91,6 +91,14 @@ static bool nav_pose_ready(const INS_Pose_t *pose)
     return pose != NULL && ((pose->flags & required) == required);
 }
 
+/**
+  * @brief  从 INS 读取当前位姿并检查是否已就绪（IMU 有效 + 航向已归零）
+  * @param  pose  输出参数，存放读取到的位姿数据
+  * @retval true  读取成功且 INS 已就绪
+  * @retval false 读取失败或 INS 未就绪
+  * @note   该函数是获取导航系统有效位姿的唯一入口，
+  *         只有 IMU 数据有效且 yaw 已置零后才返回 true。
+  */
 static bool nav_get_pose(INS_Pose_t *pose)
 {
     return (pose != NULL) && INS_Pose_Read(pose) && nav_pose_ready(pose);
@@ -110,6 +118,14 @@ static float nav_distance_to_target(Nav_Runtime_t *rt, const INS_Pose_t *pose)
     return dist;
 }
 
+/**
+  * @brief  更新导航距离误差和航向角偏差
+  * @param  rt  导航运行时状态指针
+  * @param  pose  当前 INS 位姿数据
+  * @retval 无
+  * @note   计算当前位置到目标点的直线距离（dist_error_m）
+  *         以及当前航向与目标最终航向的偏差（yaw_error_deg）。
+  */
 static void nav_update_errors(Nav_Runtime_t *rt, const INS_Pose_t *pose)
 {
     if (pose == NULL) {
@@ -118,7 +134,14 @@ static void nav_update_errors(Nav_Runtime_t *rt, const INS_Pose_t *pose)
     (void)nav_distance_to_target(rt, pose);
     rt->yaw_error_deg = nav_wrap_180(rt->target_yaw_deg - pose->yaw_deg);
 }
-
+/**
+  * @brief  向下层运动控制队列发送一条原始命令
+  * @param  type  命令类型（FWD / TURN / BACK / STOP）
+  * @param  value 命令参数（距离/角度值）
+  * @param  cmd_id 命令ID
+  * @retval true  发送成功
+  * @retval false 队列未就绪或队列满
+  */
 static bool nav_send_motion_raw(Motion_CommandType_t type, float value, uint32_t cmd_id)
 {
     Motion_Command_t cmd;
@@ -140,6 +163,11 @@ static bool nav_send_motion_raw(Motion_CommandType_t type, float value, uint32_t
     return true;
 }
 
+/**
+  * @brief  重置运动命令等待状态，清除所有等待标志
+  * @param  rt  导航运行时状态指针
+  * @retval 无
+  */
 static void nav_reset_motion_wait(Nav_Runtime_t *rt)
 {
     rt->waiting_motion_cmd_id = 0U;
@@ -291,6 +319,16 @@ static void nav_print_status(Nav_Runtime_t *rt)
     }
 }
 
+/**
+  * @brief  准备 goto 点到点导航，计算目标航向和距离并进入对应状态
+  * @param  rt  导航运行时状态指针
+  * @param  x_m  目标点 X 坐标，单位 m
+  * @param  y_m  目标点 Y 坐标，单位 m
+  * @param  yaw_deg  到达目标后的最终期望航向角，单位 °
+  * @param  internal_call  是否为内部调用（true 跳过忙检查）
+  * @retval true  准备成功，已进入 TURN_TO_TARGET 或 TURN_TO_FINAL_YAW 状态
+  * @retval false 准备失败（导航忙 / 运动忙 / INS 未就绪 / 距离超限）
+  */
 static bool nav_prepare_goto(Nav_Runtime_t *rt,
                              float x_m,
                              float y_m,
@@ -300,7 +338,7 @@ static bool nav_prepare_goto(Nav_Runtime_t *rt,
     INS_Pose_t pose;
     float dx;
     float dy;
-    float dist;
+    float dist;//计算当前位置与目标位置的距离
 
     if (rt->state != NAV_STATE_IDLE &&
         rt->state != NAV_STATE_DONE &&
@@ -328,18 +366,18 @@ static bool nav_prepare_goto(Nav_Runtime_t *rt,
         return false;
     }
 
-    rt->square_active = false;
-    rt->target_x_m = x_m;
-    rt->target_y_m = y_m;
-    rt->target_yaw_deg = nav_wrap_180(yaw_deg);
-    rt->drive_distance_m = dist;
-    rt->dist_error_m = dist;
-    rt->target_heading_deg = (dist <= NAV_POS_TOL_M)
-                                 ? pose.yaw_deg
-                                 : (atan2f(dy, dx) * NAV_RAD_TO_DEG);
-    rt->yaw_error_deg = nav_wrap_180(rt->target_heading_deg - pose.yaw_deg);
-    rt->state = (dist <= NAV_POS_TOL_M) ? NAV_STATE_TURN_TO_FINAL_YAW
-                                        : NAV_STATE_TURN_TO_TARGET;
+    rt->square_active = false;                                          /**< 取消正方形模式 */
+    rt->target_x_m = x_m;                                               /**< 保存目标点 X 坐标 */
+    rt->target_y_m = y_m;                                               /**< 保存目标点 Y 坐标 */
+    rt->target_yaw_deg = nav_wrap_180(yaw_deg);                         /**< 保存最终期望航向角（归一化到 ±180°） */
+    rt->drive_distance_m = dist;                                        /**< 保存当前段总行驶距离 */
+    rt->dist_error_m = dist;                                            /**< 初始化距离误差为总距离 */
+    rt->target_heading_deg = (dist <= NAV_POS_TOL_M)                    /**< 计算目标行进方向角： */
+                                 ? pose.yaw_deg                         /**<   如果已经到达目标点 → 保持当前航向 */
+                                 : (atan2f(dy, dx) * NAV_RAD_TO_DEG);   /**<   否则 → atan2(dy,dx) 算朝向目标的方向角 */
+    rt->yaw_error_deg = nav_wrap_180(rt->target_heading_deg - pose.yaw_deg); /**< 计算航向偏差（需要转多少度） */
+    rt->state = (dist <= NAV_POS_TOL_M) ? NAV_STATE_TURN_TO_FINAL_YAW   /**< 已到达 → 直接进入最终航向调整 */
+                                        : NAV_STATE_TURN_TO_TARGET;     /**< 未到达 → 先转向目标方向 */
     nav_reset_motion_wait(rt);
 
     LOG_RAW("[NAV] goto target=(%+.3f,%+.3f,%+.1f) heading=%+.1f dist=%.3f\r\n",
@@ -391,6 +429,15 @@ static void nav_start_square(Nav_Runtime_t *rt, float side_m)
             pose.yaw_deg);
 }
 
+/**
+  * @brief  处理导航命令（仅更新运行时数据和状态机，不直接控制电机）
+  * @param  rt  导航运行时状态指针
+  * @param  cmd  收到的导航命令
+  * @retval 无
+  * @note   GOTO 和 SQUARE 命令只设置目标参数 + 切换状态，
+  *         实际运动命令由 nav_task 中的 nav_update() 在后续周期中发出。
+  *         STOP 命令会直接向底层发送电机停止指令。
+  */
 static void nav_handle_command(Nav_Runtime_t *rt, const Nav_Command_t *cmd)
 {
     if (cmd == NULL) {
@@ -399,13 +446,13 @@ static void nav_handle_command(Nav_Runtime_t *rt, const Nav_Command_t *cmd)
 
     switch (cmd->type) {
         case NAV_CMD_HELP:
-            nav_print_help();
+            nav_print_help();//帮助命令
             break;
         case NAV_CMD_STATUS:
-            nav_print_status(rt);
+            nav_print_status(rt);//打印车辆当前状态命令
             break;
         case NAV_CMD_STOP:
-            (void)nav_send_motion_raw(MOTION_CMD_STOP, 0.0f, 0U);
+            (void)nav_send_motion_raw(MOTION_CMD_STOP, 0.0f, 0U);//想电机底层发送停止指令
             rt->state = NAV_STATE_IDLE;
             rt->square_active = false;
             nav_reset_motion_wait(rt);
@@ -459,6 +506,18 @@ static void nav_finish_square(Nav_Runtime_t *rt)
     }
 }
 
+/**
+  * @brief  更新 goto 点到点导航状态机（转向目标 → 直行 → 调整最终航向）
+  * @param  rt  导航运行时状态指针
+  * @param  pose  当前 INS 位姿数据
+  * @retval 无
+  * @note   状态机流程：
+  *         TURN_TO_TARGET    → 先转向目标方向
+  *         DRIVE_TO_TARGET   → 直行到目标点附近
+  *         TURN_TO_FINAL_YAW → 到达后调整最终航向 → DONE
+  *         每一步通过 nav_start_motion_step 发送运动命令到 motion 层，
+  *         并通过 nav_motion_step_result 等待运动完成。
+  */
 static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
 {
     float dist;
@@ -569,6 +628,13 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
     }
 }
 
+/**
+  * @brief  更新正方形路径行走状态机（直行 → 转弯 → 直行 → 转弯，共 4 次）
+  * @param  rt  导航运行时状态指针
+  * @retval 无
+  * @note   正方形路径由 4 条边组成，每条边先直行再右转 90°，
+  *         最后一轮转弯完成后进入 DONE 状态。
+  */
 static void nav_update_square(Nav_Runtime_t *rt)
 {
     int8_t motion_result;
@@ -636,6 +702,17 @@ static void nav_update_square(Nav_Runtime_t *rt)
     }
 }
 
+/**
+  * @brief  导航状态机主更新函数（每 50ms 由 nav_task 周期调用，持续运行）
+  * @param  rt  导航运行时状态指针
+  * @retval 无
+  * @note   该函数在 nav_task 主循环中每 50ms 被调用一次。
+  *         状态机持续运行，根据当前 rt->state 分发到对应的子状态机：
+  *         - IDLE / DONE / ERROR：直接返回，不执行动作
+  *         - SQUARE_DRIVE / SQUARE_TURN：调用 nav_update_square
+  *         - 其他 goto 状态：读取 INS 位姿 → 更新误差 → 调用 nav_update_goto
+  *         当 INS 丢失时自动进入 ERROR 状态并停止电机。
+  */
 static void nav_update(Nav_Runtime_t *rt)
 {
     INS_Pose_t pose;

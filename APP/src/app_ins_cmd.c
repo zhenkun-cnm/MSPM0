@@ -7,6 +7,10 @@
 #include "app_motion.h"
 #include "app_nav.h"
 #include "app_path.h"
+#include "app_gray.h"
+#include "app_gray_line.h"
+#include "app_motor_encoder.h"
+#include "app_tb6612.h"
 #include "app_test1.h"
 #include "dev_uart_rx.h"
 #include "port_log.h"
@@ -19,6 +23,20 @@
 
 #define INS_CMD_TASK_PERIOD_MS  10U
 #define INS_CMD_LINE_MAX        80U
+#define SPEEDTEST_PRINT_MS      100U
+#define SPEEDTEST_WHEEL_CIRCUM_UM 150796L
+
+typedef struct {
+    bool running;
+    int16_t pwm;
+    bool ref_ready;
+    int64_t prev_left_total;
+    int64_t prev_right_total;
+    uint32_t prev_seq;
+    TickType_t last_print_tick;
+} SpeedTest_State_t;
+
+static SpeedTest_State_t s_speedTest = {0};
 
 static bool str_eq(const char *a, const char *b)
 {
@@ -109,6 +127,174 @@ static bool send_path_cmd(Path_CommandType_t type)
     }
 
     return true;
+}
+
+static bool send_grayline_cmd(GrayLine_CommandType_t type)
+{
+    GrayLine_Command_t cmd;
+    cmd.type = type;
+
+    if (g_grayLineCmdQueue == NULL) {
+        LOG_RAW("[GRAYLINE] error: queue not ready\r\n");
+        return false;
+    }
+
+    if (xQueueSend(g_grayLineCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
+        LOG_RAW("[GRAYLINE] error: queue full\r\n");
+        return false;
+    }
+
+    return true;
+}
+
+static void speedtest_send_motor_cmd(MotorCmdType type, int16_t val)
+{
+    MotorCmd cmd;
+
+    if (g_motorCmdQueue == NULL) {
+        LOG_RAW("[SPDTEST] error: motor queue not ready\r\n");
+        return;
+    }
+
+    cmd.type = type;
+    cmd.val = val;
+    (void)xQueueSend(g_motorCmdQueue, &cmd, pdMS_TO_TICKS(20));
+}
+
+static int32_t speedtest_counts_to_mmps(int32_t counts,
+                                        int32_t counts_per_rev,
+                                        uint32_t dt_ms)
+{
+    int64_t num;
+
+    if (dt_ms == 0U || counts_per_rev == 0) {
+        return 0;
+    }
+
+    num = (int64_t)counts * (int64_t)SPEEDTEST_WHEEL_CIRCUM_UM;
+    num /= (int64_t)counts_per_rev;
+    num /= (int64_t)dt_ms;
+    return (int32_t)num;
+}
+
+static int16_t clamp_pwm_arg(int16_t pwm)
+{
+    if (pwm < -100) {
+        return -100;
+    }
+    if (pwm > 100) {
+        return 100;
+    }
+    return pwm;
+}
+
+static void speedtest_print_help(void)
+{
+    LOG_RAW("[SPDTEST] commands:\r\n");
+    LOG_RAW("[SPDTEST]   speedtest start <pwm 0..100>\r\n");
+    LOG_RAW("[SPDTEST]   speedtest stop\r\n");
+    LOG_RAW("[SPDTEST]   speedtest status\r\n");
+}
+
+static void speedtest_start(int16_t pwm)
+{
+    memset(&s_speedTest, 0, sizeof(s_speedTest));
+    s_speedTest.running = true;
+    s_speedTest.pwm = clamp_pwm_arg(pwm);
+    if (s_speedTest.pwm < 0) {
+        s_speedTest.pwm = (int16_t)-s_speedTest.pwm;
+    }
+    s_speedTest.last_print_tick = xTaskGetTickCount();
+
+    speedtest_send_motor_cmd(MOTOR_CMD_DIR, (int16_t)TB6612_DIR_FORWARD);
+    speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, s_speedTest.pwm);
+    speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, s_speedTest.pwm);
+    speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 1);
+    LOG_RAW("[SPDTEST] start pwm=%d print=%ums\r\n",
+            (int)s_speedTest.pwm,
+            (unsigned)SPEEDTEST_PRINT_MS);
+}
+
+static void speedtest_stop(void)
+{
+    speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, 0);
+    speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, 0);
+    speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 0);
+    memset(&s_speedTest, 0, sizeof(s_speedTest));
+    LOG_RAW("[SPDTEST] stop\r\n");
+}
+
+static void speedtest_print_status(void)
+{
+    LOG_RAW("[SPDTEST] run=%u pwm=%d ref=%u\r\n",
+            s_speedTest.running ? 1U : 0U,
+            (int)s_speedTest.pwm,
+            s_speedTest.ref_ready ? 1U : 0U);
+}
+
+static void speedtest_tick(void)
+{
+    MotorEncoderSnapshot_t enc;
+    TickType_t now;
+    uint32_t frame_count;
+    uint32_t dt_ms;
+    int32_t left_counts;
+    int32_t right_counts;
+    int32_t left_mmps;
+    int32_t right_mmps;
+    int32_t ratio_x100;
+
+    if (!s_speedTest.running) {
+        return;
+    }
+
+    now = xTaskGetTickCount();
+    if ((uint32_t)((now - s_speedTest.last_print_tick) * portTICK_PERIOD_MS) <
+        SPEEDTEST_PRINT_MS) {
+        return;
+    }
+    s_speedTest.last_print_tick = now;
+
+    if (!MotorEncoder_ReadSnapshot(&enc)) {
+        LOG_RAW("[SPDTEST] encoder snapshot failed\r\n");
+        return;
+    }
+
+    if (!s_speedTest.ref_ready || enc.seq == s_speedTest.prev_seq) {
+        s_speedTest.prev_left_total = enc.left_total_counts;
+        s_speedTest.prev_right_total = enc.right_total_counts;
+        s_speedTest.prev_seq = enc.seq;
+        s_speedTest.ref_ready = true;
+        LOG_RAW("[SPDTEST] sync seq=%lu\r\n", (unsigned long)enc.seq);
+        return;
+    }
+
+    frame_count = enc.seq - s_speedTest.prev_seq;
+    dt_ms = frame_count * (uint32_t)MOTOR_ENC_PERIOD_MS;
+    left_counts = (int32_t)(enc.left_total_counts - s_speedTest.prev_left_total);
+    right_counts = (int32_t)(enc.right_total_counts - s_speedTest.prev_right_total);
+    left_mmps = speedtest_counts_to_mmps(left_counts,
+                                         (int32_t)MOTOR1_COUNTS_PER_OUTPUT_REV_CAL,
+                                         dt_ms);
+    right_mmps = speedtest_counts_to_mmps(right_counts,
+                                          (int32_t)MOTOR2_COUNTS_PER_OUTPUT_REV_CAL,
+                                          dt_ms);
+    ratio_x100 = (left_mmps != 0) ?
+                 (int32_t)(((int64_t)right_mmps * 100LL) / (int64_t)left_mmps) :
+                 0;
+
+    LOG_RAW("[SPDTEST] pwm=%d dt_ms=%lu lc=%ld rc=%ld lmmps=%ld rmmps=%ld ratio_x100=%ld\r\n",
+            (int)s_speedTest.pwm,
+            (unsigned long)dt_ms,
+            (long)left_counts,
+            (long)right_counts,
+            (long)left_mmps,
+            (long)right_mmps,
+            (long)ratio_x100);
+
+    s_speedTest.prev_left_total = enc.left_total_counts;
+    s_speedTest.prev_right_total = enc.right_total_counts;
+    s_speedTest.prev_seq = enc.seq;
 }
 
 #if APP_TEST1_ENABLE
@@ -323,6 +509,40 @@ static void parse_line(char *line)
         (void)send_path_cmd(PATH_CMD_SAVE);
     } else if (str_eq(line, "path load") || str_eq(line, "path flash load")) {
         (void)send_path_cmd(PATH_CMD_LOAD);
+    } else if (str_eq(line, "gray help")) {
+        Gray_PrintHelp();
+    } else if (str_eq(line, "gray status")) {
+        Gray_PrintStatus();
+    } else if (str_eq(line, "gray polarity high")) {
+        Gray_SetPolarity(GRAY_POLARITY_ACTIVE_HIGH);
+        LOG_RAW("[GRAY] polarity=HIGH\r\n");
+    } else if (str_eq(line, "gray polarity low")) {
+        Gray_SetPolarity(GRAY_POLARITY_ACTIVE_LOW);
+        LOG_RAW("[GRAY] polarity=LOW\r\n");
+    } else if (str_eq(line, "grayline help")) {
+        (void)send_grayline_cmd(GRAYLINE_CMD_HELP);
+    } else if (str_eq(line, "grayline status")) {
+        (void)send_grayline_cmd(GRAYLINE_CMD_STATUS);
+    } else if (str_eq(line, "grayline start")) {
+        (void)send_grayline_cmd(GRAYLINE_CMD_START);
+    } else if (str_eq(line, "grayline stop")) {
+        (void)send_grayline_cmd(GRAYLINE_CMD_STOP);
+    } else if (str_eq(line, "grayline pid")) {
+        (void)send_grayline_cmd(GRAYLINE_CMD_PID);
+    } else if (str_eq(line, "speedtest help")) {
+        speedtest_print_help();
+    } else if (str_eq(line, "speedtest status")) {
+        speedtest_print_status();
+    } else if (str_eq(line, "speedtest stop")) {
+        speedtest_stop();
+    } else if (str_prefix(line, "speedtest start ")) {
+        char *end = NULL;
+        long pwm = strtol(line + strlen("speedtest start "), &end, 10);
+        if (end != (line + strlen("speedtest start "))) {
+            speedtest_start((int16_t)pwm);
+        } else {
+            LOG_RAW("[SPDTEST] error: usage speedtest start <pwm 0..100>\r\n");
+        }
 #if APP_TEST1_ENABLE
     } else if (str_eq(line, "test1 help")) {
         (void)send_test1_cmd(TEST1_CMD_HELP);
@@ -345,12 +565,21 @@ static void parse_line(char *line)
     } else if (str_prefix(line, "path")) {
         LOG_RAW("[PATH] unknown: %s\r\n", line);
         LOG_RAW("[PATH] try: path help\r\n");
+    } else if (str_prefix(line, "grayline")) {
+        LOG_RAW("[GRAYLINE] unknown: %s\r\n", line);
+        LOG_RAW("[GRAYLINE] try: grayline help\r\n");
+    } else if (str_prefix(line, "gray")) {
+        LOG_RAW("[GRAY] unknown: %s\r\n", line);
+        LOG_RAW("[GRAY] try: gray help or grayline help\r\n");
+    } else if (str_prefix(line, "speedtest")) {
+        LOG_RAW("[SPDTEST] unknown: %s\r\n", line);
+        LOG_RAW("[SPDTEST] try: speedtest help\r\n");
     } else if (str_prefix(line, "test1")) {
         LOG_RAW("[TEST1] unknown: %s\r\n", line);
         LOG_RAW("[TEST1] try: test1 help\r\n");
     } else if (line[0] != '\0') {
         LOG_RAW("[INS_CMD] unknown: %s\r\n", line);
-        LOG_RAW("[INS_CMD] try: ins help, motion help, nav help, path help, or test1 help\r\n");
+        LOG_RAW("[INS_CMD] try: ins help, motion help, nav help, path help, gray help, grayline help, or test1 help\r\n");
     }
 }
 
@@ -370,7 +599,7 @@ void ins_cmd_task(void *pvParameters)
     }
 
     uart->init(uart);
-    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help / nav help / path help / test1 help\r\n");
+    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help / nav help / path help / gray help / grayline help / speedtest help / test1 help\r\n");
 
     while (1) {
         uint8_t ch;
@@ -396,6 +625,7 @@ void ins_cmd_task(void *pvParameters)
             }
         }
 
+        speedtest_tick();
         vTaskDelay(pdMS_TO_TICKS(INS_CMD_TASK_PERIOD_MS));
     }
 }

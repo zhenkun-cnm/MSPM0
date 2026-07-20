@@ -83,6 +83,52 @@ static void dir_apply(TB6612_Dir dir)
     }
 }
 
+static void dir_set_left(TB6612_Dir dir)
+{
+    switch (dir) {
+        case TB6612_DIR_FORWARD:
+            DL_GPIO_clearPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
+            DL_GPIO_setPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+            break;
+        case TB6612_DIR_REVERSE:
+            DL_GPIO_setPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
+            DL_GPIO_clearPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+            break;
+        case TB6612_DIR_BRAKE:
+            DL_GPIO_clearPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
+            DL_GPIO_clearPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+            break;
+        case TB6612_DIR_COAST:
+        default:
+            DL_GPIO_setPins(TB6612_AIN1_PORT, TB6612_AIN1_PIN);
+            DL_GPIO_setPins(TB6612_AIN2_PORT, TB6612_AIN2_PIN);
+            break;
+    }
+}
+
+static void dir_set_right(TB6612_Dir dir)
+{
+    switch (dir) {
+        case TB6612_DIR_FORWARD:
+            DL_GPIO_setPins(TB6612_BIN1_PORT, TB6612_BIN1_PIN);
+            DL_GPIO_clearPins(TB6612_BIN2_PORT, TB6612_BIN2_PIN);
+            break;
+        case TB6612_DIR_REVERSE:
+            DL_GPIO_clearPins(TB6612_BIN1_PORT, TB6612_BIN1_PIN);
+            DL_GPIO_setPins(TB6612_BIN2_PORT, TB6612_BIN2_PIN);
+            break;
+        case TB6612_DIR_BRAKE:
+            DL_GPIO_clearPins(TB6612_BIN1_PORT, TB6612_BIN1_PIN);
+            DL_GPIO_clearPins(TB6612_BIN2_PORT, TB6612_BIN2_PIN);
+            break;
+        case TB6612_DIR_COAST:
+        default:
+            DL_GPIO_setPins(TB6612_BIN1_PORT, TB6612_BIN1_PIN);
+            DL_GPIO_setPins(TB6612_BIN2_PORT, TB6612_BIN2_PIN);
+            break;
+    }
+}
+
 /* ========== 静态函数：PWM 驱动 ========== */
 
 static void pwm_set_duty(uint8_t pct)
@@ -211,6 +257,16 @@ void PORT_TB6612_SetRightDuty(uint8_t pct)
 }
 
 /* ========== 工厂函数 ========== */
+
+void PORT_TB6612_SetLeftDirection(TB6612_Dir dir)
+{
+    dir_set_left(dir);
+}
+
+void PORT_TB6612_SetRightDirection(TB6612_Dir dir)
+{
+    dir_set_right(dir);
+}
 
 DevTB6612* GetTB6612(void)
 {

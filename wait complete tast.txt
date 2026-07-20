@@ -1,0 +1,68 @@
+危险等级说明: 1~5 (5最高)
+
+=== 问题 1: INS_Pose_Read 读加锁导致读-读互斥 ===
+危险等级: 1
+文件: APP/src/app_ins.c (第21行)
+描述: INS_Pose_Read() 使用互斥锁 (xSemaphoreTake) 保护读操作。多个读者同时调用时，
+      读者之间会互相阻塞，这不是必要的——纯读操作不存在竞态条件。
+建议: 纯读不需要互斥锁。可用临界段 (taskENTER_CRITICAL) 替代，或改用读写锁思路。
+      当前只等1ms，实际碰撞概率低，风险等级定为1。
+
+=== 问题 2: INS_LogRecord_t 使用 __attribute__((packed)) 存在非对齐访问风险 ===
+危险等级: 3
+文件: APP/src/app_ins.c (第60行)
+描述: INS_LogRecord_t 结构体使用了 __attribute__((packed)) 取消字节对齐，
+      其内部成员 uint32_t seq 和 uint32_t tick_ms 在 packed 下起始地址为
+      4 字节对齐的偶数倍（如 0x0004、0x0008），而结构中混有 uint16_t 字段
+      导致后续 uint32_t 可能出现在非 4 字节对齐地址上。
+      在 Cortex-M0+ (MSPM0G3507) 上，LDR 指令访问未对齐的 32 位数据
+      会触发 UsageFault / HardFault。
+建议: 在读写该结构体时，使用 memcpy 逐字节拷贝，或将结构体手动定义为
+      自然对齐的成员再强制转换，避免编译器生成直接 LDR 未对齐地址的代码。
+      也可在 packed 结构体定义时手动填充 padding 保证自然对齐。
+
+=== 注意事项: nav_task 与 path_task 功能重叠，可选择性关闭 ===
+危险等级: 3
+文件: APP/src/app_nav.c / APP/src/app_path.c
+描述: app_nav.c 实现的是 goto 点到点导航和正方形路径，
+      app_path.c 实现的是示教-复现（Teach-and-Replay）导航。
+      两者功能不同但均依赖 ins_task 提供位姿数据。
+      如果项目只使用 app_path.c 的示教复现功能，
+      可以关闭 nav_task 以节省 CPU 和栈资源。
+注意: 关闭 nav_task 不影响 path_task 和 ins_task 的正常运行。
+       连续跟踪模式（PATH_STATE_REPLAY_TRACK）不依赖 motion_task，
+       可直接通过 g_motorCmdQueue 控制电机 PWM。
+
+=== 注意事项: app_path.c 路径中部靠近终点时的日志降频输出 ===
+危险等级: 2
+文件: APP/src/app_path.c (path_update_track 函数)
+描述: path_update_track 中有一个日志降频输出机制：
+       条件：距离终点 <= 0.06m (near_final)，但 replay_index < done_min_index（还没到路径尾部）
+       防提前完成保护拦截了 done，但为了调试需要每 500ms 输出一条诊断日志。
+       降频控制：首次打印 或 距上次打印 >= 500ms 时才再次打印，防止刷屏。
+       输出格式：[PATH_TRACK] near final ignored idx=32/166 final_dist=0.052 done_idx=163
+建议: 这是正常行为，无需处理。如果不想看到这些日志，可以删除 else if (near_final) 分支。
+      如删除，需注意防提前完成保护仍正常工作。
+
+=== 注意事项: app_path.c 旧版分段回放代码处于关闭状态 ===
+危险等级: 2
+文件: APP/src/app_path.c
+描述: app_path.c 中的 REPLAY_SEGMENT / REPLAY_TURN / REPLAY_DRIVE 三个状态
+      及其对应的逻辑分支（path_update_replay 中的旧版代码）当前处于关闭状态。
+      path_start_replay() 入口始终设定为 REPLAY_TRACK（连续轨迹跟踪模式），
+      旧版分段回放代码已无外部触发路径，属于死代码（dead code）。
+   建议: 可安全删除这 3 个枚举状态、path_advance_replay() 函数以及
+      path_update_replay() 中对应的条件分支，以精简代码。
+      如保留，需注意后续维护时不要被混淆。
+
+=== 注意事项: app_path.c 连续轨迹跟踪的 Lookahead 前视推进机制 ===
+危险等级: 4
+文件: APP/src/app_path.c (path_update_track 函数)
+描述: path_update_track 中的 Lookahead 前视推进机制：
+       从当前 replay_index 开始逐个检查，找到距离小车 >= LOOKAHEAD_M (0.10m) 的路点作为目标点。
+       这样小车不会"盯着脚下"而是"看向前方"，提前转向使路径更平滑。
+       如果路径末尾所有点都不满足条件，replay_index 会停在最后一个点。
+建议: 这是正常行为，无需处理。如果希望小车转弯更激进或更平滑，
+       可以调整 PATH_TRACK_LOOKAHEAD_M (0.10m) 的值：
+       减小 → 视野更近，转向更及时但可能更抖
+       增大 → 视野更远，路径更平滑但转弯可能滞后

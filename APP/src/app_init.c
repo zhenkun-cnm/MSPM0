@@ -14,6 +14,8 @@
 #include "app_motion.h"
 #include "app_nav.h"
 #include "app_path.h"
+#include "app_gray.h"
+#include "app_gray_line.h"
 #include "app_stack_monitor.h"
 #include "app_test1.h"
 #include "dev_led.h"
@@ -37,6 +39,8 @@
 #define MOTION_TASK_STACK_WORDS      192U
 #define NAV_TASK_STACK_WORDS         160U
 #define PATH_TASK_STACK_WORDS        384U
+#define GRAY_TASK_STACK_WORDS        128U
+#define GRAYLINE_TASK_STACK_WORDS    192U
 #define FLASH_TASK_STACK_WORDS       192U
 #define TEST1_TASK_STACK_WORDS       384U
 
@@ -52,6 +56,8 @@ extern void ins_cmd_task(void *pvParameters);
 extern void motion_task(void *pvParameters);
 extern void nav_task(void *pvParameters);
 extern void path_task(void *pvParameters);
+extern void gray_task(void *pvParameters);
+extern void grayline_task(void *pvParameters);
 #if APP_TEST1_ENABLE
 extern void test1_task(void *pvParameters);
 #endif
@@ -66,6 +72,8 @@ static TaskHandle_t s_insCmdTaskHandle = NULL;
 static TaskHandle_t s_motionTaskHandle = NULL;
 static TaskHandle_t s_navTaskHandle = NULL;
 static TaskHandle_t s_pathTaskHandle = NULL;
+static TaskHandle_t s_grayTaskHandle = NULL;
+static TaskHandle_t s_grayLineTaskHandle = NULL;
 static TaskHandle_t s_flashTaskHandle = NULL;
 #if APP_TEST1_ENABLE
 static TaskHandle_t s_test1TaskHandle = NULL;
@@ -134,6 +142,11 @@ static void start_task(void *pvParameters)
     g_pathCmdQueue = xQueueCreate(PATH_CMD_QUEUE_LEN, sizeof(Path_Command_t));
     if (g_pathCmdQueue == NULL) {
         LOG_ERROR("[INIT] path cmd queue create failed!\r\n");
+    }
+
+    g_grayLineCmdQueue = xQueueCreate(GRAYLINE_CMD_QUEUE_LEN, sizeof(GrayLine_Command_t));
+    if (g_grayLineCmdQueue == NULL) {
+        LOG_ERROR("[INIT] grayline cmd queue create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE
@@ -268,6 +281,34 @@ static void start_task(void *pvParameters)
         LOG_INFO("  PATH task created (prio=2)\r\n");
     } else {
         LOG_ERROR("[INIT] path task create failed!\r\n");
+    }
+
+    if (xTaskCreate(gray_task,
+                    "gray",
+                    GRAY_TASK_STACK_WORDS,
+                    NULL,
+                    3,
+                    &s_grayTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_GRAY,
+                                   s_grayTaskHandle,
+                                   GRAY_TASK_STACK_WORDS);
+        LOG_INFO("  GRAY task created (prio=3)\r\n");
+    } else {
+        LOG_ERROR("[INIT] gray task create failed!\r\n");
+    }
+
+    if (xTaskCreate(grayline_task,
+                    "grayline",
+                    GRAYLINE_TASK_STACK_WORDS,
+                    NULL,
+                    3,
+                    &s_grayLineTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_GRAYLINE,
+                                   s_grayLineTaskHandle,
+                                   GRAYLINE_TASK_STACK_WORDS);
+        LOG_INFO("  GRAYLINE task created (prio=3)\r\n");
+    } else {
+        LOG_ERROR("[INIT] grayline task create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE

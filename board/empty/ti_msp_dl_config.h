@@ -174,6 +174,22 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define sys_uart_BAUD_RATE                                              (115200)
 #define sys_uart_IBRD_40_MHZ_115200_BAUD                                    (21)
 #define sys_uart_FBRD_40_MHZ_115200_BAUD                                    (45)
+/* Defines for UART_0 */
+#define UART_0_INST                                                        UART1
+#define UART_0_INST_FREQUENCY                                           40000000
+#define UART_0_INST_IRQHandler                                  UART1_IRQHandler
+#define UART_0_INST_INT_IRQN                                      UART1_INT_IRQn
+#define GPIO_UART_0_RX_PORT                                                GPIOA
+#define GPIO_UART_0_TX_PORT                                                GPIOA
+#define GPIO_UART_0_RX_PIN                                        DL_GPIO_PIN_18
+#define GPIO_UART_0_TX_PIN                                        DL_GPIO_PIN_17
+#define GPIO_UART_0_IOMUX_RX                                     (IOMUX_PINCM40)
+#define GPIO_UART_0_IOMUX_TX                                     (IOMUX_PINCM39)
+#define GPIO_UART_0_IOMUX_RX_FUNC                      IOMUX_PINCM40_PF_UART1_RX
+#define GPIO_UART_0_IOMUX_TX_FUNC                      IOMUX_PINCM39_PF_UART1_TX
+#define UART_0_BAUD_RATE                                                  (9600)
+#define UART_0_IBRD_40_MHZ_9600_BAUD                                       (260)
+#define UART_0_FBRD_40_MHZ_9600_BAUD                                        (27)
 
 
 
@@ -269,6 +285,22 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define TB6612_BIN2_PORT                                                 (GPIOA)
 #define TB6612_BIN2_PIN                                         (DL_GPIO_PIN_23)
 #define TB6612_BIN2_IOMUX                                        (IOMUX_PINCM53)
+/* Defines for AD0: GPIOA.8 with pinCMx 19 on package pin 54 */
+#define Find_Block_AD0_PORT                                              (GPIOA)
+#define Find_Block_AD0_PIN                                       (DL_GPIO_PIN_8)
+#define Find_Block_AD0_IOMUX                                     (IOMUX_PINCM19)
+/* Defines for AD1: GPIOB.5 with pinCMx 18 on package pin 53 */
+#define Find_Block_AD1_PORT                                              (GPIOB)
+#define Find_Block_AD1_PIN                                       (DL_GPIO_PIN_5)
+#define Find_Block_AD1_IOMUX                                     (IOMUX_PINCM18)
+/* Defines for AD2: GPIOA.9 with pinCMx 20 on package pin 55 */
+#define Find_Block_AD2_PORT                                              (GPIOA)
+#define Find_Block_AD2_PIN                                       (DL_GPIO_PIN_9)
+#define Find_Block_AD2_IOMUX                                     (IOMUX_PINCM20)
+/* Defines for OUT: GPIOB.4 with pinCMx 17 on package pin 52 */
+#define Find_Block_OUT_PORT                                              (GPIOB)
+#define Find_Block_OUT_PIN                                       (DL_GPIO_PIN_4)
+#define Find_Block_OUT_IOMUX                                     (IOMUX_PINCM17)
 
 
 
@@ -286,6 +318,7 @@ void SYSCFG_DL_TB6612_ENA_init(void);
 void SYSCFG_DL_TB6612_ENB_init(void);
 void SYSCFG_DL_I2C_0_init(void);
 void SYSCFG_DL_sys_uart_init(void);
+void SYSCFG_DL_UART_0_init(void);
 void SYSCFG_DL_W25Q64_init(void);
 void SYSCFG_DL_DMA_init(void);
 

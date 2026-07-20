@@ -15,84 +15,115 @@
 #include <stdint.h>
 #include <string.h>
 
-#define PATH_TASK_PERIOD_MS          50U
-#define PATH_MAX_POINTS              500U
-#define PATH_RECORD_MIN_DIST_M       0.05f
-#define PATH_RECORD_MIN_YAW_DEG      5.0f
-#define PATH_POS_TOL_M               0.05f
-#define PATH_YAW_TOL_DEG             3.0f
-#define PATH_MIN_DRIVE_M             0.03f
-#define PATH_MAX_LEG_M               1.00f
-#define PATH_REPLAY_ARC_MIN_YAW_DEG  5.0f
-#define PATH_REPLAY_MIN_ARC_RADIUS_M 0.15f
-#define PATH_REPLAY_MAX_ARC_RADIUS_M 2.00f
-#define PATH_MOTION_START_TIMEOUT_MS 500U
-#define PATH_CMD_ID_BASE             0x72000000UL
-#define PATH_RAD_TO_DEG              57.295779513082320876f
-#define PATH_DEG_TO_RAD              0.017453292519943295f
-#define PATH_TRACK_LOOKAHEAD_M       0.10f
-#define PATH_TRACK_COMPLETE_DIST_M   0.06f
-#define PATH_TRACK_DONE_INDEX_BACKOFF 3U
-#define PATH_TRACK_BASE_PWM          16.0f
-#define PATH_TRACK_YAW_KP            0.35f
-#define PATH_TRACK_TRIM_MAX          8.0f
-#define PATH_TRACK_PWM_MIN           6.0f
-#define PATH_TRACK_PWM_MAX           30.0f
-#define PATH_TRACK_PWM_SLEW          2.0f
-#define PATH_TRACK_LOG_PERIOD_MS     500U
-#define PATH_FLASH_START_ADDR        0x000F0000UL
-#define PATH_FLASH_SECTOR_SIZE       4096UL
-#define PATH_FLASH_SECTOR_COUNT      2U
-#define PATH_FLASH_BYTES             (PATH_FLASH_SECTOR_SIZE * PATH_FLASH_SECTOR_COUNT)
-#define PATH_FLASH_MAGIC             0x48545052UL /* "RPTH" little-endian */
-#define PATH_FLASH_VERSION           1U
+/* ===== 任务周期 ===== */
+#define PATH_TASK_PERIOD_MS          50U    /* 任务调度周期 (ms) */
 
+/* ===== 路径录制 ===== */
+#define PATH_MAX_POINTS              500U   /* 路径点缓冲区最大容量 */
+#define PATH_RECORD_MIN_DIST_M       0.05f  /* 触发新录点的最小位置变化 (m) */
+#define PATH_RECORD_MIN_YAW_DEG      5.0f   /* 触发新录点的最小朝向变化 (deg) */
+
+/* ===== 回放运动命令 ===== */
+#define PATH_POS_TOL_M               0.05f  /* 位置容差 (m) */
+#define PATH_YAW_TOL_DEG             3.0f   /* 朝向容差 (deg) */
+#define PATH_MIN_DRIVE_M             0.03f  /* 最小直驱距离 (m)，小于此值视为原地转向 */
+#define PATH_MAX_LEG_M               1.00f  /* 单段最大驱动距离 (m)，超过报错 */
+#define PATH_REPLAY_ARC_MIN_YAW_DEG  5.0f   /* 弧线拟合的最小朝向变化 (deg) */
+#define PATH_REPLAY_MIN_ARC_RADIUS_M 0.15f  /* 弧线拟合的最小半径 (m) */
+#define PATH_REPLAY_MAX_ARC_RADIUS_M 2.00f  /* 弧线拟合的最大半径 (m) */
+#define PATH_MOTION_START_TIMEOUT_MS 500U   /* 等待运动命令被接受的距离(ms) */
+#define PATH_CMD_ID_BASE             0x72000000UL  /* 运动命令 ID 基址 (防止与其他模块冲突) */
+
+/* ===== 数学常量 ===== */
+#define PATH_RAD_TO_DEG              57.295779513082320876f  /* 弧度转角度 (180/pi) */
+#define PATH_DEG_TO_RAD              0.017453292519943295f   /* 角度转弧度 (pi/180) */
+
+/* ===== 连续轨迹跟踪 (REPLAY_TRACK 模式) ===== */
+#define PATH_TRACK_LOOKAHEAD_M       0.10f  /* 前视距离 (m)：寻找此距离外的路点作为目标 */
+#define PATH_TRACK_COMPLETE_DIST_M   0.06f  /* 到达终点判定阈值 (m) */
+#define PATH_TRACK_DONE_INDEX_BACKOFF 3U    /* 终点附近防提前完成：距终点 N 个索引内才允许 done */
+#define PATH_TRACK_BASE_PWM          16.0f  /* 基速 PWM */
+#define PATH_TRACK_YAW_KP            0.35f  /* 航向误差比例增益 */
+#define PATH_TRACK_TRIM_MAX          8.0f   /* 差速修正最大限幅 (PWM) */
+#define PATH_TRACK_PWM_MIN           6.0f   /* 最小允许 PWM */
+#define PATH_TRACK_PWM_MAX           30.0f  /* 最大允许 PWM */
+#define PATH_TRACK_PWM_SLEW          2.0f   /* PWM 缓变率：每 50ms 最大变化量 */
+#define PATH_TRACK_LOG_PERIOD_MS     500U   /* 轨迹跟踪日志输出周期 (ms) */
+
+/* ===== Flash 存储 ===== */
+#define PATH_FLASH_START_ADDR        0x000F0000UL  /* Flash 存储起始地址 */
+#define PATH_FLASH_SECTOR_SIZE       4096UL        /* Flash 扇区大小 (字节) */
+#define PATH_FLASH_SECTOR_COUNT      2U            /* 占用扇区数 */
+#define PATH_FLASH_BYTES             (PATH_FLASH_SECTOR_SIZE * PATH_FLASH_SECTOR_COUNT)  /* 总存储空间 (字节) */
+#define PATH_FLASH_MAGIC             0x48545052UL  /* "RPTH" little-endian 魔数 */
+#define PATH_FLASH_VERSION           1U            /* 存储格式版本号 */
+
+/* 全局路径命令队列，由 UART 命令处理模块发送命令到此队列 */
 QueueHandle_t g_pathCmdQueue = NULL;
 
+/**
+ * @brief 路径模块状态机枚举
+ */
 typedef enum {
-    PATH_STATE_IDLE = 0,
-    PATH_STATE_RECORDING,
-    PATH_STATE_REPLAY_TURN,
-    PATH_STATE_REPLAY_DRIVE,
-    PATH_STATE_REPLAY_SEGMENT,
-    PATH_STATE_REPLAY_TRACK,
-    PATH_STATE_DONE,
-    PATH_STATE_ERROR
+    PATH_STATE_IDLE = 0,        /* 空闲状态 */
+    PATH_STATE_RECORDING,       /* 正在录制路径 */
+    PATH_STATE_REPLAY_TURN,     /* (旧版分段回放) 正在转向 */
+    PATH_STATE_REPLAY_DRIVE,    /* (旧版分段回放) 正在直驱 */
+    PATH_STATE_REPLAY_SEGMENT,  /* (旧版分段回放) 正在解析下一段 */
+    PATH_STATE_REPLAY_TRACK,    /* (当前使用) 连续轨迹跟踪回放 */
+    PATH_STATE_DONE,            /* 回放完成 */
+    PATH_STATE_ERROR            /* 错误状态 */
 } Path_State_t;
 
+/**
+ * @brief 路径点数据结构
+ *        存储单个路点的位置 (x, y) 和朝向角
+ */
 typedef struct {
-    float x_m;
-    float y_m;
-    float yaw_deg;
+    float x_m;       /* X 坐标 (m) */
+    float y_m;       /* Y 坐标 (m) */
+    float yaw_deg;   /* 朝向角 (deg) */
 } Path_Point_t;
 
+/**
+ * @brief 路径模块运行时状态
+ *        存储当前状态机的全部运行时变量
+ */
 typedef struct {
-    Path_State_t state;
-    uint16_t replay_index;
-    uint32_t next_motion_cmd_id;
-    uint32_t waiting_motion_cmd_id;
-    bool motion_cmd_sent;
-    bool motion_accepted;
-    TickType_t motion_cmd_tick;
-    uint16_t track_target_index;
-    float track_last_dist_m;
-    float track_last_final_dist_m;
-    float track_last_heading_error_deg;
-    int16_t track_last_left_pwm;
-    int16_t track_last_right_pwm;
-    TickType_t track_last_log_tick;
-    TickType_t track_near_final_log_tick;
-    bool track_motor_started;
+    Path_State_t state;         /* 当前状态机状态 */
+    uint16_t replay_index;      /* 回放当前指向的路点索引 */
+
+    /* ---- 运动命令等待/完成状态 ---- */
+    uint32_t next_motion_cmd_id;       /* 下一个运动命令 ID 种子 */
+    uint32_t waiting_motion_cmd_id;    /* 当前等待完成的运动命令 ID */
+    bool motion_cmd_sent;              /* 是否已发送运动命令 */
+    bool motion_accepted;              /* 运动命令是否被 motion 模块接受 */
+    TickType_t motion_cmd_tick;        /* 运动命令发送时的系统 tick */
+
+    /* ---- 连续轨迹跟踪运行数据 ---- */
+    uint16_t track_target_index;       /* 当前跟踪目标点索引 */
+    float track_last_dist_m;           /* 到目标点的距离 (m) */
+    float track_last_final_dist_m;     /* 到终点的距离 (m) */
+    float track_last_heading_error_deg;/* 航向偏差 (deg)，正=偏左 */
+    int16_t track_last_left_pwm;       /* 左轮当前 PWM */
+    int16_t track_last_right_pwm;      /* 右轮当前 PWM */
+    TickType_t track_last_log_tick;    /* 上次输出轨迹日志的时刻 */
+    TickType_t track_near_final_log_tick; /* 上次输出"near final"日志的时刻 */
+    bool track_motor_started;          /* 电机是否已启动 */
 } Path_Runtime_t;
 
+/**
+ * @brief Flash 存储文件头结构 (packed 对齐)
+ *        存储在 Flash 的起始地址，用于校验和版本管理
+ */
 typedef struct __attribute__((packed)) {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t point_size;
-    uint16_t max_points;
-    uint16_t count;
-    uint32_t data_bytes;
-    uint32_t checksum;
+    uint32_t magic;         /* 魔数 "RPTH"，用于快速识别有效数据 */
+    uint16_t version;       /* 存储格式版本号 */
+    uint16_t point_size;    /* 单个路径点结构体大小 (用于兼容性检查) */
+    uint16_t max_points;    /* 最大支持的点数 */
+    uint16_t count;         /* 实际存储的路径点数 */
+    uint32_t data_bytes;    /* 点数据总字节数 (count * sizeof(Path_Point_t)) */
+    uint32_t checksum;      /* FNV-1a 校验和，校验点数据区域 */
 } Path_FlashHeader_t;
 
 static Path_Point_t s_pathPoints[PATH_MAX_POINTS];
@@ -657,7 +688,7 @@ static void path_start_record(Path_Runtime_t *rt)
 
     memset(s_pathPoints, 0, sizeof(s_pathPoints));
     s_pathCount = 0U;
-    (void)path_add_point(&pose);
+    (void)path_add_point(&pose);//记录起点
     rt->state = PATH_STATE_RECORDING;
     rt->replay_index = 0U;
     path_reset_motion_wait(rt);
@@ -761,7 +792,17 @@ static void path_handle_command(Path_Runtime_t *rt, const Path_Command_t *cmd)
             break;
     }
 }
-
+/**
+ * @brief 周期性录制更新函数（每 50ms 由 path_task 调用）
+ *
+ * 仅在 PATH_STATE_RECORDING 状态下工作。
+ * 以 5cm 位置变化 / 5deg 朝向变化为阈值，采样当前 INS 位姿并存入路径点缓冲区。
+ *
+ * 工作流程：
+ *   1. 若缓冲区为空（起点缺失），先补录当前位姿作为第 0 点
+ *   2. 检查当前位姿与最后一个录制点的距离和朝向差
+ *   3. 超过阈值 -> 记录新点；缓冲区满 -> 自动停止录制
+ */
 static void path_update_record(Path_Runtime_t *rt)
 {
     INS_Pose_t pose;
@@ -813,6 +854,22 @@ static void path_advance_replay(Path_Runtime_t *rt)
     }
 }
 
+/**
+ * @brief 连续轨迹跟踪更新函数（每 50ms 由 path_task -> path_update_replay 调用）
+ *
+ * 仅在 PATH_STATE_REPLAY_TRACK 状态下工作，是当前默认的回放方式。
+ *
+ * 算法流程：
+ *   1. 检查终点距离，若已接近终点且索引在最后 N 个点内 → 停止电机，状态切为 DONE
+ *   2. Lookahead 推进：从当前索引开始依次向后检查，找到距离当前位置 >= 0.10m 的目标点
+ *   3. 计算目标方向角 heading_deg = atan2(target->y - pose.y, target->x - pose.x)
+ *   4. 航向误差 heading_error = heading_deg - pose.yaw_deg（正 = 偏左）
+ *   5. 比例控制：trim = heading_error * YAW_KP(0.35)，限幅 ±8 PWM
+ *   6. PWM 生成：left  = BASE_PWM(16) - trim, right = BASE_PWM(16) + trim
+ *   7. PWM 限幅 [6, 30] 和缓变（每 50ms 最大变化 2）
+ *   8. 发送到电机（首次启动需发 DIR + ON 命令）
+ *   9. 每 500ms 输出一次 [PATH_TRACK] 日志
+ */
 static void path_update_track(Path_Runtime_t *rt)
 {
     INS_Pose_t pose;
@@ -849,9 +906,23 @@ static void path_update_track(Path_Runtime_t *rt)
     final = &s_pathPoints[s_pathCount - 1U];
     final_dist = path_distance_to_point(&pose, final);
     rt->track_last_final_dist_m = final_dist;
+
+    /*
+     * 防提前完成保护：计算"允许完成的最小索引"
+     * 距离终点 >= 3 个点时不允许触发完成，只有进入最后 3 个点时才能完成。
+     * 防止小车在路径中部偶然靠近终点位置时误判为已完成。
+     * 例如：PATH_TRACK_DONE_INDEX_BACKOFF=3, s_pathCount=100
+     *   → done_min_index = 97（只有 idx >= 97 时距离终点已不足 3 个点，才允许 done）
+     */
     done_min_index = (s_pathCount > PATH_TRACK_DONE_INDEX_BACKOFF) ?
                      (uint16_t)(s_pathCount - PATH_TRACK_DONE_INDEX_BACKOFF) :
                      (uint16_t)(s_pathCount - 1U);
+
+    /*
+     * near_final：当前位置距离终点 <= 0.06m（位置距离，不是时间）
+     * 完成条件 = near_final && replay_index >= done_min_index
+     *   = 位置距离足够近 + 索引已进入路径尾部 → 才真正完成
+     */
     near_final = final_dist <= PATH_TRACK_COMPLETE_DIST_M;
     if (near_final && rt->replay_index >= done_min_index) {
         path_track_stop_motors();
@@ -868,6 +939,12 @@ static void path_update_track(Path_Runtime_t *rt)
                 pose.yaw_deg);
         return;
     } else if (near_final) {
+        /*
+         * 日志降频输出：路径中部偶然靠近终点时，每 500ms 输出一条诊断日志。
+         * 条件：距离终点 <= 0.06m，但 replay_index < done_min_index（还没到路径尾部）
+         * → 防提前完成保护拦截了 done，但输出日志便于调试。
+         * 降频控制：首次打印 或 距上次打印 >= 500ms 时才再次打印，防止刷屏。
+         */
         now = xTaskGetTickCount();
         if (rt->track_near_final_log_tick == 0U ||
             ((uint32_t)((now - rt->track_near_final_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
@@ -880,80 +957,95 @@ static void path_update_track(Path_Runtime_t *rt)
         }
     }
 
+    /*
+     * Lookahead 推进：向前寻找"前视距离"之外的目标点
+     * 从当前 replay_index 开始逐个检查，找到距离小车 >= LOOKAHEAD_M (0.10m) 的路点。
+     * 这样小车不会盯着脚下而是"看向前方"，提前转向使路径更平滑。
+     * 如果所有点都不满足（路径末尾），replay_index 会停在 s_pathCount - 1（最后一个点）。
+     */
     while (rt->replay_index < (s_pathCount - 1U)) {
         target_dist = path_distance_to_point(&pose, &s_pathPoints[rt->replay_index]);
         if (target_dist >= PATH_TRACK_LOOKAHEAD_M) {
-            break;
+            break;  /* 找到足够远的目标点，停止推进 */
         }
-        rt->replay_index++;
+        rt->replay_index++;  /* 当前点太近，索引后移继续找 */
     }
 
-    target = &s_pathPoints[rt->replay_index];
-    dx = target->x_m - pose.x_m;
-    dy = target->y_m - pose.y_m;
-    target_dist = sqrtf((dx * dx) + (dy * dy));
-    if (target_dist < 0.001f) {
-        target_dist = final_dist;
-        dx = final->x_m - pose.x_m;
+    target = &s_pathPoints[rt->replay_index];                                           /* 获取目标路点指针 */
+    dx = target->x_m - pose.x_m;                                                        /* 目标方向 X 分量 */
+    dy = target->y_m - pose.y_m;                                                        /* 目标方向 Y 分量 */
+    target_dist = sqrtf((dx * dx) + (dy * dy));                                          /* 到目标点的直线距离 */
+    if (target_dist < 0.001f) {                                                         /* 若距离接近零（无意义） */
+        target_dist = final_dist;                                                       /* 回退：使用到终点的距离 */
+        dx = final->x_m - pose.x_m;                                                     /* 重新计算方向指向终点 */
         dy = final->y_m - pose.y_m;
     }
 
-    heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;
-    heading_error = path_wrap_180(heading_deg - pose.yaw_deg);
-    trim = path_clamp_f32(heading_error * PATH_TRACK_YAW_KP,
-                          -PATH_TRACK_TRIM_MAX,
-                          PATH_TRACK_TRIM_MAX);
+    heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;                                     /* 计算目标方向角 (deg) */
+    heading_error = path_wrap_180(heading_deg - pose.yaw_deg);                           /* 航向误差：目标方向 - 当前朝向，正 = 偏左 */
+    trim = path_clamp_f32(heading_error * PATH_TRACK_YAW_KP,                             /* 比例控制：误差 × 增益 */
+                          -PATH_TRACK_TRIM_MAX,                                          /* 差速修正限幅：最大 +8 */
+                          PATH_TRACK_TRIM_MAX);                                         /* 差速修正限幅：最大 -8 */
 
-    left_pwm_f = PATH_TRACK_BASE_PWM - trim;
-    right_pwm_f = PATH_TRACK_BASE_PWM + trim;
-    left_pwm_f = path_clamp_f32(left_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);
-    right_pwm_f = path_clamp_f32(right_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);
+    left_pwm_f = PATH_TRACK_BASE_PWM - trim;                                             /* 左轮：基速 - 修正 (偏左时左轮减速) */
+    right_pwm_f = PATH_TRACK_BASE_PWM + trim;                                            /* 右轮：基速 + 修正 (偏左时右轮加速) */
+    left_pwm_f = path_clamp_f32(left_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);     /* 左轮 PWM 限幅 [6,30] */
+    right_pwm_f = path_clamp_f32(right_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);   /* 右轮 PWM 限幅 [6,30] */
 
-    left_pwm_f = path_slew_f32((float)rt->track_last_left_pwm,
+    left_pwm_f = path_slew_f32((float)rt->track_last_left_pwm,                          /* 左轮 PWM 缓变：防突变 */
                                left_pwm_f,
                                PATH_TRACK_PWM_SLEW);
-    right_pwm_f = path_slew_f32((float)rt->track_last_right_pwm,
+    right_pwm_f = path_slew_f32((float)rt->track_last_right_pwm,                        /* 右轮 PWM 缓变 */
                                 right_pwm_f,
                                 PATH_TRACK_PWM_SLEW);
-    left_pwm_f = path_clamp_f32(left_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);
+    left_pwm_f = path_clamp_f32(left_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);     /* 缓变后再限幅 */
     right_pwm_f = path_clamp_f32(right_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);
-    left_pwm = path_clamp_pwm(left_pwm_f);
+    left_pwm = path_clamp_pwm(left_pwm_f);                                               /* float 转 int16_t */
     right_pwm = path_clamp_pwm(right_pwm_f);
 
-    if (!rt->track_motor_started) {
+    if (!rt->track_motor_started) {                                                     /* 首次启动：需发 DIR + ON */
         if (!path_track_start_motors(left_pwm, right_pwm)) {
             path_enter_error(rt, "motor start failed");
             return;
         }
         rt->track_motor_started = true;
-    } else if (!path_track_apply_pwm(left_pwm, right_pwm)) {
+    } else if (!path_track_apply_pwm(left_pwm, right_pwm)) {                            /* 运行中：仅更新 PWM */
         path_enter_error(rt, "motor pwm failed");
         return;
     }
 
-    rt->track_target_index = rt->replay_index;
-    rt->track_last_dist_m = target_dist;
-    rt->track_last_heading_error_deg = heading_error;
-    rt->track_last_left_pwm = left_pwm;
-    rt->track_last_right_pwm = right_pwm;
+    rt->track_target_index = rt->replay_index;                                           /* 保存当前跟踪目标索引 */
+    rt->track_last_dist_m = target_dist;                                                 /* 保存到目标点的距离 */
+    rt->track_last_heading_error_deg = heading_error;                                    /* 保存航向误差 */
+    rt->track_last_left_pwm = left_pwm;                                                  /* 保存左轮 PWM (用于下次缓变) */
+    rt->track_last_right_pwm = right_pwm;                                                /* 保存右轮 PWM */
 
     now = xTaskGetTickCount();
-    if (rt->track_last_log_tick == 0U ||
+    if (rt->track_last_log_tick == 0U ||                                                /* 首次 或 距上次 >= 500ms */
         ((uint32_t)((now - rt->track_last_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
         rt->track_last_log_tick = now;
         log_printf_internal("[PATH_TRACK] idx=%u/%u dist=%.3f herr=%+.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
-                            (unsigned)rt->track_target_index,
-                            (unsigned)s_pathCount,
-                            rt->track_last_dist_m,
-                            rt->track_last_heading_error_deg,
-                            (int)rt->track_last_left_pwm,
-                            (int)rt->track_last_right_pwm,
-                            pose.x_m,
-                            pose.y_m,
-                            pose.yaw_deg);
+                            (unsigned)rt->track_target_index,                           /* 目标点索引 */
+                            (unsigned)s_pathCount,                                      /* 总点数 */
+                            rt->track_last_dist_m,                                      /* 到目标距离 */
+                            rt->track_last_heading_error_deg,                           /* 航向误差 */
+                            (int)rt->track_last_left_pwm,                               /* 左轮 PWM */
+                            (int)rt->track_last_right_pwm,                              /* 右轮 PWM */
+                            pose.x_m,                                                   /* 当前 X */
+                            pose.y_m,                                                   /* 当前 Y */
+                            pose.yaw_deg);                                              /* 当前朝向 */
     }
 }
 
+/**
+ * @brief 回放更新函数（每 50ms 由 path_task 调用）
+ *
+ * 当前默认使用 REPLAY_TRACK 连续轨迹跟踪模式：
+ *   交由 path_update_track() 处理，基于 Lookahead 前视 + 航向误差比例控制
+ *   直接驱动电机 PWM，实现平滑连续的回放行驶。
+ *
+ * 旧版分段回放（REPLAY_SEGMENT/TURN/DRIVE）已关闭，代码保留仅做参考。
+ */
 static void path_update_replay(Path_Runtime_t *rt)
 {
     const Path_Point_t *prev;

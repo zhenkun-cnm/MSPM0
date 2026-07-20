@@ -14,6 +14,7 @@
 #include "app_menu.h"
 #include "app_tb6612.h"
 #include "app_motion.h"
+#include "app_gray_line.h"
 #include "app_ins.h"
 #include "dev_tft.h"
 #include "dev_menu.h"
@@ -121,15 +122,28 @@ static const MenuItem arcPidItems[] = {
 #define ARC_PID_ITEM_COUNT     (sizeof(arcPidItems) / sizeof(arcPidItems[0]))
 #define ARC_PID_STATUS_INDEX   1U
 
+static const MenuItem grayLinePidItems[] = {
+    {"Kp",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.kp},              {.f = 0.0f},  {.f = 0.500f}, {.f = 0.001f}},
+    {"Ki",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.ki},              {.f = 0.0f},  {.f = 0.100f}, {.f = 0.001f}},
+    {"Kd",      MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.kd},              {.f = 0.0f},  {.f = 0.100f}, {.f = 0.001f}},
+    {"TurnMax", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.turn_mps_max},    {.f = 0.0f},  {.f = 0.300f}, {.f = 0.005f}},
+    {"BaseMps", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.base_mps},        {.f = 0.02f}, {.f = 0.250f}, {.f = 0.005f}},
+    {"LostMs",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.lost_timeout_ms}, {.f = 50.0f}, {.f = 1000.0f}, {.f = 50.0f}},
+    {"Slew",    MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.pwm_slew},        {.f = 0.5f},  {.f = 10.0f},  {.f = 0.5f}},
+    {"RevMax",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.reverse_mps_max}, {.f = 0.0f},  {.f = 0.150f}, {.f = 0.005f}},
+};
+#define GRAYLINE_PID_ITEM_COUNT  (sizeof(grayLinePidItems) / sizeof(grayLinePidItems[0]))
+
 static const MenuItem pidItems[] = {
     {"Straight",  MENU_SUBMENU, straightYawPidItems, (uint8_t)STRAIGHT_YAW_PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"TurnYaw",   MENU_SUBMENU, turnYawPidItems,     (uint8_t)TURN_YAW_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"WheelSpd",  MENU_SUBMENU, wheelSpeedPidItems,  (uint8_t)WHEEL_SPEED_PID_ITEM_COUNT,  MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Arc",       MENU_SUBMENU, arcPidItems,         (uint8_t)ARC_PID_ITEM_COUNT,          MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"GrayLine",  MENU_SUBMENU, grayLinePidItems,    (uint8_t)GRAYLINE_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Yaw Status", MENU_LEAF,    NULL,                0,                                   MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 #define PID_ITEM_COUNT  (sizeof(pidItems) / sizeof(pidItems[0]))
-#define PID_YAW_STATUS_INDEX 4U
+#define PID_YAW_STATUS_INDEX 5U
 
 static const MenuItem testItems[] = {
     {"LED Test",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
@@ -185,7 +199,8 @@ static uint8_t decimals_from_step(float step)
     if (step < 0.0f) step = -step;
     if (step >= 1.0f)  return 0;
     if (step >= 0.1f)  return 1;
-    return 2;
+    if (step >= 0.01f) return 2;
+    return 3;
 }
 
 /* ================================================================

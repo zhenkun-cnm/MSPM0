@@ -20,7 +20,9 @@ typedef enum {
     MOTOR_CMD_LEFT_ONLY,    /* Left wheel only (A fwd, B coast) */
     MOTOR_CMD_RIGHT_ONLY,   /* Right wheel only (B fwd, A coast) */
     MOTOR_CMD_LEFT_SPEED,   /* Left channel speed only (0-100), val=0..100 */
-    MOTOR_CMD_RIGHT_SPEED   /* Right channel speed only (0-100), val=0..100 */
+    MOTOR_CMD_RIGHT_SPEED,  /* Right channel speed only (0-100), val=0..100 */
+    MOTOR_CMD_LEFT_SIGNED_SPEED,  /* Left signed speed, val=-100..100 */
+    MOTOR_CMD_RIGHT_SIGNED_SPEED  /* Right signed speed, val=-100..100 */
 } MotorCmdType;
 
 /* 电机命令结构体 */

@@ -20,4 +20,8 @@ void PORT_TB6612_RightOnly(void);
 void PORT_TB6612_SetLeftDuty(uint8_t pct);
 void PORT_TB6612_SetRightDuty(uint8_t pct);
 
+/* Independent left/right direction control */
+void PORT_TB6612_SetLeftDirection(TB6612_Dir dir);
+void PORT_TB6612_SetRightDirection(TB6612_Dir dir);
+
 #endif /* PORT_TB6612_H */

@@ -31,6 +31,47 @@ extern void PORT_TB6612_LeftOnly(void);
 extern void PORT_TB6612_RightOnly(void);
 extern void PORT_TB6612_SetLeftDuty(uint8_t pct);
 extern void PORT_TB6612_SetRightDuty(uint8_t pct);
+extern void PORT_TB6612_SetLeftDirection(TB6612_Dir dir);
+extern void PORT_TB6612_SetRightDirection(TB6612_Dir dir);
+
+static uint8_t abs_pwm_i16(int16_t value)
+{
+    if (value < 0) {
+        value = (int16_t)-value;
+    }
+    if (value > 100) {
+        value = 100;
+    }
+    return (uint8_t)value;
+}
+
+static void apply_left_signed_pwm(int16_t signed_pwm)
+{
+    uint8_t duty = abs_pwm_i16(signed_pwm);
+
+    if (signed_pwm > 0) {
+        PORT_TB6612_SetLeftDirection(TB6612_DIR_FORWARD);
+    } else if (signed_pwm < 0) {
+        PORT_TB6612_SetLeftDirection(TB6612_DIR_REVERSE);
+    } else {
+        PORT_TB6612_SetLeftDirection(TB6612_DIR_BRAKE);
+    }
+    PORT_TB6612_SetLeftDuty(duty);
+}
+
+static void apply_right_signed_pwm(int16_t signed_pwm)
+{
+    uint8_t duty = abs_pwm_i16(signed_pwm);
+
+    if (signed_pwm > 0) {
+        PORT_TB6612_SetRightDirection(TB6612_DIR_FORWARD);
+    } else if (signed_pwm < 0) {
+        PORT_TB6612_SetRightDirection(TB6612_DIR_REVERSE);
+    } else {
+        PORT_TB6612_SetRightDirection(TB6612_DIR_BRAKE);
+    }
+    PORT_TB6612_SetRightDuty(duty);
+}
 
 void tb6612_task(void *pvParameters)
 {
@@ -51,6 +92,8 @@ void tb6612_task(void *pvParameters)
     static bool     s_on       = false;
     static uint8_t  s_leftSpd  = 0;
     static uint8_t  s_rightSpd = 0;
+    static int16_t  s_leftSignedSpd = 0;
+    static int16_t  s_rightSignedSpd = 0;
     static MotorCmd cmd;
 
     while (1)
@@ -65,8 +108,13 @@ void tb6612_task(void *pvParameters)
                 if (cmd.val != 0) {
                     s_on = true;
                     motor->enable(motor);
-                    PORT_TB6612_SetLeftDuty(s_leftSpd);
-                    PORT_TB6612_SetRightDuty(s_rightSpd);
+                    if (s_leftSignedSpd != 0 || s_rightSignedSpd != 0) {
+                        apply_left_signed_pwm(s_leftSignedSpd);
+                        apply_right_signed_pwm(s_rightSignedSpd);
+                    } else {
+                        PORT_TB6612_SetLeftDuty(s_leftSpd);
+                        PORT_TB6612_SetRightDuty(s_rightSpd);
+                    }
                     /* LOG_INFO("[TB6612] Motor ON, speed=%d%%, dir=%s\r\n",
                              motor->getSpeed(motor),
                              s_dirNames[motor->getDirection(motor)]); */
@@ -109,6 +157,7 @@ void tb6612_task(void *pvParameters)
             case MOTOR_CMD_LEFT_SPEED:
                 if (cmd.val < 0) cmd.val = 0;
                 if (cmd.val > 100) cmd.val = 100;
+                s_leftSignedSpd = 0;
                 s_leftSpd = (uint8_t)cmd.val;
                 if (s_on) {
                     PORT_TB6612_SetLeftDuty(s_leftSpd);
@@ -119,11 +168,32 @@ void tb6612_task(void *pvParameters)
             case MOTOR_CMD_RIGHT_SPEED:
                 if (cmd.val < 0) cmd.val = 0;
                 if (cmd.val > 100) cmd.val = 100;
+                s_rightSignedSpd = 0;
                 s_rightSpd = (uint8_t)cmd.val;
                 if (s_on) {
                     PORT_TB6612_SetRightDuty(s_rightSpd);
                 }
                 /* LOG_INFO("[TB6612] Right speed=%d%%\r\n", (int)cmd.val); */
+                break;
+
+            case MOTOR_CMD_LEFT_SIGNED_SPEED:
+                if (cmd.val < -100) cmd.val = -100;
+                if (cmd.val > 100) cmd.val = 100;
+                s_leftSignedSpd = cmd.val;
+                s_leftSpd = abs_pwm_i16(cmd.val);
+                if (s_on) {
+                    apply_left_signed_pwm(s_leftSignedSpd);
+                }
+                break;
+
+            case MOTOR_CMD_RIGHT_SIGNED_SPEED:
+                if (cmd.val < -100) cmd.val = -100;
+                if (cmd.val > 100) cmd.val = 100;
+                s_rightSignedSpd = cmd.val;
+                s_rightSpd = abs_pwm_i16(cmd.val);
+                if (s_on) {
+                    apply_right_signed_pwm(s_rightSignedSpd);
+                }
                 break;
 
             default:

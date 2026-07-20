@@ -18,6 +18,14 @@
 INS_PoseGlobal_t g_insPoseGlobal = {{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U}, NULL};
 QueueHandle_t g_insCmdQueue = NULL;
 
+/**
+  * @brief  读取 INS 位姿数据（线程安全，带互斥锁保护）
+  * @param  out  输出参数，存放读取的位姿数据
+  * @retval true  读取成功
+  * @retval false 读取失败（指针无效 / 锁未初始化 / 锁被占用超时）
+  * @note   若锁被其他任务持有，最多等待 1ms 即返回 false，
+  *         避免调用者长时间阻塞。
+  */
 bool INS_Pose_Read(INS_Pose_t *out)
 {
     if (out == NULL || g_insPoseGlobal.lock == NULL) return false;

@@ -19,6 +19,7 @@ const GPIO3    = GPIO.addInstance();
 const GPIO4    = GPIO.addInstance();
 const GPIO5    = GPIO.addInstance();
 const GPIO6    = GPIO.addInstance();
+const GPIO7    = GPIO.addInstance();
 const I2C      = scripting.addModule("/ti/driverlib/I2C", {}, false);
 const I2C1     = I2C.addInstance();
 const NONMAIN  = scripting.addModule("/ti/driverlib/NONMAIN");
@@ -32,6 +33,7 @@ const SYSCTL   = scripting.addModule("/ti/driverlib/SYSCTL");
 const SYSTICK  = scripting.addModule("/ti/driverlib/SYSTICK");
 const UART     = scripting.addModule("/ti/driverlib/UART", {}, false);
 const UART1    = UART.addInstance();
+const UART2    = UART.addInstance();
 
 /**
  * Write custom configuration values to the imported modules.
@@ -146,6 +148,18 @@ GPIO6.associatedPins[2].pin.$assign = "PB23";
 GPIO6.associatedPins[3].$name       = "BIN2";
 GPIO6.associatedPins[3].pin.$assign = "PA23";
 
+GPIO7.$name                         = "Find_Block";
+GPIO7.associatedPins.create(4);
+GPIO7.associatedPins[0].$name       = "AD0";
+GPIO7.associatedPins[0].pin.$assign = "PA8";
+GPIO7.associatedPins[1].$name       = "AD1";
+GPIO7.associatedPins[1].pin.$assign = "PB5";
+GPIO7.associatedPins[2].$name       = "AD2";
+GPIO7.associatedPins[2].pin.$assign = "PA9";
+GPIO7.associatedPins[3].$name       = "OUT";
+GPIO7.associatedPins[3].direction   = "INPUT";
+GPIO7.associatedPins[3].pin.$assign = "PB4";
+
 I2C1.$name                           = "I2C_0";
 I2C1.basicEnableController           = true;
 I2C1.basicControllerStandardBusSpeed = "Fast";
@@ -237,6 +251,13 @@ UART1.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
 UART1.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
 UART1.rxPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric1";
 UART1.rxPinConfig.enableConfig         = true;
+
+UART2.$name                    = "UART_0";
+UART2.peripheral.$assign       = "UART1";
+UART2.peripheral.rxPin.$assign = "PA18";
+UART2.peripheral.txPin.$assign = "PA17";
+UART2.txPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric12";
+UART2.rxPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric13";
 
 /**
  * Pinmux solution for unlocked pins/peripherals. This ensures that minor changes to the automatic solver in a future

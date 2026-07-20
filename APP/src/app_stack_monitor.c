@@ -1,6 +1,6 @@
 /**
  * @file    app_stack_monitor.c
- * @brief   Print FreeRTOS task stack high-water marks every 10 seconds.
+ * @brief   Print FreeRTOS task stack high-water marks every 100 seconds.
  */
 #include "app_stack_monitor.h"
 #include "portable.h"
@@ -8,7 +8,7 @@
 #include "timers.h"
 #include <stdint.h>
 
-#define MONITOR_PERIOD_MS          10000U
+#define MONITOR_PERIOD_MS          100000U
 #define MONITOR_STACK_DEPTH        192U
 
 typedef struct {
@@ -29,6 +29,8 @@ static StackMonEntry s_tasks[APP_STACK_MON_COUNT] = {
     [APP_STACK_MON_MOTION]    = { "motion",       NULL, 192 },
     [APP_STACK_MON_NAV]       = { "nav",          NULL, 160 },
     [APP_STACK_MON_PATH]      = { "path",         NULL, 384 },
+    [APP_STACK_MON_GRAY]      = { "gray",         NULL, 128 },
+    [APP_STACK_MON_GRAYLINE]  = { "grayline",     NULL, 192 },
     [APP_STACK_MON_FLASH]     = { "flash_test",   NULL, 192 },
     [APP_STACK_MON_MONITOR]   = { "stack_mon",    NULL, MONITOR_STACK_DEPTH },
 };

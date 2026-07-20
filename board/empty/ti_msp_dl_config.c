@@ -59,6 +59,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_TB6612_ENB_init();
     SYSCFG_DL_I2C_0_init();
     SYSCFG_DL_sys_uart_init();
+    SYSCFG_DL_UART_0_init();
     SYSCFG_DL_W25Q64_init();
     SYSCFG_DL_DMA_init();
     SYSCFG_DL_SYSTICK_init();
@@ -106,6 +107,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_TimerG_reset(TB6612_ENB_INST);
     DL_I2C_reset(I2C_0_INST);
     DL_UART_Main_reset(sys_uart_INST);
+    DL_UART_Main_reset(UART_0_INST);
     DL_SPI_reset(W25Q64_INST);
 
 
@@ -117,6 +119,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_TimerG_enablePower(TB6612_ENB_INST);
     DL_I2C_enablePower(I2C_0_INST);
     DL_UART_Main_enablePower(sys_uart_INST);
+    DL_UART_Main_enablePower(UART_0_INST);
     DL_SPI_enablePower(W25Q64_INST);
 
 
@@ -165,6 +168,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 GPIO_sys_uart_IOMUX_RX, GPIO_sys_uart_IOMUX_RX_FUNC,
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_UART_0_IOMUX_TX, GPIO_UART_0_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_UART_0_IOMUX_RX, GPIO_UART_0_IOMUX_RX_FUNC);
 
     DL_GPIO_initPeripheralOutputFunction(
         GPIO_W25Q64_IOMUX_SCLK, GPIO_W25Q64_IOMUX_SCLK_FUNC);
@@ -217,10 +224,24 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 
     DL_GPIO_initDigitalOutput(TB6612_BIN2_IOMUX);
 
+    DL_GPIO_initDigitalOutput(Find_Block_AD0_IOMUX);
+
+    DL_GPIO_initDigitalOutput(Find_Block_AD1_IOMUX);
+
+    DL_GPIO_initDigitalOutput(Find_Block_AD2_IOMUX);
+
+    DL_GPIO_initDigitalInputFeatures(Find_Block_OUT_IOMUX,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+
     DL_GPIO_clearPins(GPIOA, TB6612_AIN1_PIN |
-		TB6612_BIN2_PIN);
+		TB6612_BIN2_PIN |
+		Find_Block_AD0_PIN |
+		Find_Block_AD2_PIN);
     DL_GPIO_enableOutput(GPIOA, TB6612_AIN1_PIN |
-		TB6612_BIN2_PIN);
+		TB6612_BIN2_PIN |
+		Find_Block_AD0_PIN |
+		Find_Block_AD2_PIN);
     DL_GPIO_clearPins(GPIOB, LED_PIN_22_PIN |
 		CS_SPI1_CS_PIN |
 		LCD_LCD_RES_PIN |
@@ -228,7 +249,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		LCD_LCD_CS_PIN |
 		LCD_LCD_BLK_PIN |
 		TB6612_AIN2_PIN |
-		TB6612_BIN1_PIN);
+		TB6612_BIN1_PIN |
+		Find_Block_AD1_PIN);
     DL_GPIO_enableOutput(GPIOB, LED_PIN_22_PIN |
 		CS_SPI1_CS_PIN |
 		LCD_LCD_RES_PIN |
@@ -236,7 +258,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		LCD_LCD_CS_PIN |
 		LCD_LCD_BLK_PIN |
 		TB6612_AIN2_PIN |
-		TB6612_BIN1_PIN);
+		TB6612_BIN1_PIN |
+		Find_Block_AD1_PIN);
 
 }
 
@@ -527,6 +550,37 @@ SYSCONFIG_WEAK void SYSCFG_DL_sys_uart_init(void)
 
 
     DL_UART_Main_enable(sys_uart_INST);
+}
+static const DL_UART_Main_ClockConfig gUART_0ClockConfig = {
+    .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
+    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
+};
+
+static const DL_UART_Main_Config gUART_0Config = {
+    .mode        = DL_UART_MAIN_MODE_NORMAL,
+    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
+    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
+    .parity      = DL_UART_MAIN_PARITY_NONE,
+    .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
+    .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_UART_0_init(void)
+{
+    DL_UART_Main_setClockConfig(UART_0_INST, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);
+
+    DL_UART_Main_init(UART_0_INST, (DL_UART_Main_Config *) &gUART_0Config);
+    /*
+     * Configure baud rate by setting oversampling and baud rate divisors.
+     *  Target baud rate: 9600
+     *  Actual baud rate: 9599.81
+     */
+    DL_UART_Main_setOversampling(UART_0_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(UART_0_INST, UART_0_IBRD_40_MHZ_9600_BAUD, UART_0_FBRD_40_MHZ_9600_BAUD);
+
+
+
+    DL_UART_Main_enable(UART_0_INST);
 }
 
 static const DL_SPI_Config gW25Q64_config = {

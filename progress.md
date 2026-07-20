@@ -282,3 +282,63 @@ if (ret == pdPASS) {
 - Trimmed low-usage task stacks based on observed high-water marks; kept TFT unchanged due to missing stack data.
 - Added heap free/min-ever output to stack monitor.
 - Keil clean rebuild passed with `0 Error(s), 1 Warning(s)`.
+
+## 2026-07-18 - Gray sensor channel convention
+
+- 8-channel grayscale line sensor convention: the leftmost physical sensor is channel 1.
+- Current mux wiring is AD0=PA8, AD1=PB5, AD2=PA9, OUT=PB4.
+- Gray UART logs print every active channel in the sampled frame, for example `active_ch=4,5`.
+
+## 2026-07-18 - GrayLine PID v1
+
+- Added gray line-following control: gray position outer PID feeding left/right wheel-speed inner PID.
+- Channel weights are `-7,-5,-3,-1,+1,+3,+5,+7`; target position is 0.
+- UART commands are `grayline help/status/start/stop/pid`; motors remain stopped until `grayline start`.
+- TFT `PID -> GrayLine` menu edits Kp/Ki/Kd/TurnMax/BaseMps/LostMs/Slew offline.
+- When `LOG_PRINT_PID_ENABLE=1`, running GrayLine emits 10-channel VOFA JustFloat data.
+
+## 2026-07-18 - GrayLine no-speed-drop turn authority
+
+- User constraint: do not reduce `BaseMps` while improving large-arc line following.
+- Added signed left/right TB6612 speed commands so GrayLine can brake or briefly reverse the inner wheel without changing the center/base speed target.
+- GrayLine target wheel speeds now clamp to `[-RevMax, 0.25]` instead of `[0, 0.25]`; default `RevMax=0.06m/s`.
+- Fixed GrayLine wheel PWM feedforward to use each wheel's own target speed before applying the wheel-speed PID trim, so `TurnMax` produces immediate differential PWM instead of relying only on trim.
+- TFT `PID -> GrayLine` now includes `RevMax`; `grayline pid` prints it too.
+
+## 2026-07-18 - GrayLine nonlinear small-error gain
+
+- Added nonlinear GrayLine outer P gain to reduce straight-line oscillation without weakening large-arc correction.
+- When `abs(error) <= SmallBd`, the P term uses `Kp * SmallGn`; outside that band it uses full `Kp`.
+- Defaults are `SmallGn=0.45` and `SmallBd=1.0`, so `line_pos=-1/0/+1` is softer while `|line_pos|>=2` keeps full turn authority.
+- TFT `PID -> GrayLine` now edits `SmallGn` and `SmallBd`; `grayline pid` prints both.
+- Raised TFT GrayLine tuning limits for field use: `Kp` max `0.50`, `TurnMax` max `0.30`, `BaseMps` max `0.25`.
+
+## 2026-07-18 - GrayLine filtered position and ramp gain
+
+- Replaced the hard small/full P gain switch with a gradual ramp: effective gain moves from `Kp*SmallGn` at zero error to full `Kp` at `abs(error)>=SmallBd`.
+- Added first-order position filtering before the outer PID; `FiltA` is the new-sample weight, default `0.45`.
+- Default `SmallBd` is now `2.0`, so gain rises smoothly across the `0..2` sensor-position range instead of jumping at `1..2`.
+- VOFA `line_pos` now reports the filtered/control position used by the outer loop, so fractional line positions are expected.
+- TFT `PID -> GrayLine` now includes `FiltA`; `grayline pid` prints it.
+
+## 2026-07-18 - Temporary speed execution test UART
+
+- Added temporary UART commands to isolate wheel-speed execution before further GrayLine tuning.
+- Commands: `speedtest help`, `speedtest start <signed_pwm>`, `speedtest status`, `speedtest stop`.
+- While running, the command task prints every 100ms: requested PWM, sample dt, left/right encoder counts, left/right m/s, and right/left speed ratio.
+- Intended test: lift the car, run equal signed PWM such as `speedtest start 20`, capture 2-3 seconds of output, then `speedtest stop`.
+
+## 2026-07-18 - GrayLine restored to 22:32 PID baseline
+
+- Restored GrayLine to pure position outer PID plus dual wheel-speed inner PID.
+- Removed the experimental `SmallGn`, `SmallBd`, and `FiltA` tuning fields from GrayLine control, UART PID print, and TFT PID menu.
+- Defaults are `BaseMps=0.14`, `Kp=0.024`, `Ki=0`, `Kd=0.001`, `TurnMax=0.20`, `RevMax=0.06`, and `Slew=4.0`.
+- Kept the manual `speedtest start/status/stop` commands for ground speed checks.
+
+## 2026-07-19 - GrayLine PID loop explanation
+
+- Current GrayLine control has one gray-position outer PID and two parallel wheel-speed inner PID calculations.
+- The outer PID is edited through `PID -> GrayLine`; it converts `line_pos` error into `turn_mps`.
+- The left/right inner speed PID uses the shared `WheelSpd` parameters from Motion, not a separate GrayLine-only parameter group.
+- In practice, most field tuning so far changed the outer loop, `BaseMps`, `TurnMax`, `RevMax`, and `Slew`; the inner speed loop stayed at its default/shared `WheelSpd` settings.
+- The inner loop output is limited by `PwmTrim`, so it is currently a correction on top of speed-to-PWM feedforward rather than the main source of steering authority.

@@ -209,3 +209,25 @@
 - The left/right inner speed PID uses the shared `WheelSpd` parameters from Motion, not a separate GrayLine-only parameter group.
 - In practice, most field tuning so far changed the outer loop, `BaseMps`, `TurnMax`, `RevMax`, and `Slew`; the inner speed loop stayed at its default/shared `WheelSpd` settings.
 - The inner loop output is limited by `PwmTrim`, so it is currently a correction on top of speed-to-PWM feedforward rather than the main source of steering authority.
+
+## 2026-07-21 - Path reverse differential diagnostics
+
+- Kept the shared PathTrack parameters and existing path replay output flow unchanged.
+- Added reverse and signed differential speedtest modes plus expanded path direction/trim/PWM diagnostics.
+- Keil build passed with `0 Error(s), 0 Warning(s)`; on-target comparison logs are pending.
+
+## 2026-07-21 - INS command stack hardfault guard
+
+- `speedtest reverse 20 12` measured `-166/-135 mm/s`, confirming existing reverse differential output.
+- Increased `ins_cmd` stack from 160 to 256 words and added `stack_min_free` to `speedtest status` after a formatted-log HardFault.
+
+## 2026-07-21 - Non-blocking UART logger
+
+- Removed boot-faulting dynamic `log_tx` queue/task after PendSV saw `pxCurrentTCB=0x07070707`.
+- UART0 TX interrupt now sends two static 128-byte complete records without character-level interleaving; a pending replacement increments `log_overwrite`.
+- RX is 128 bytes for the 80-byte command line; FreeRTOS stack/malloc fault hooks directly report then reset. Path and motor control are unchanged.
+
+## 2026-07-21 - UART asynchronous logging rollback
+
+- Restored direct blocking UART and removed the async TX implementations after repeatable boot faults.
+- RX is again 256 bytes and FreeRTOS stack/malloc hooks are disabled; speedtest stack margin remains.

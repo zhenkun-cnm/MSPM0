@@ -415,3 +415,53 @@ Success criteria:
 - Backward straight logs `dir=B` and signed negative PWM after the signed-PWM phase.
 - Backward curve logs unequal negative left/right PWM and physically turns while reversing.
 - Mixed path changes direction without a large jump, spin, or early finish.
+
+## 2026-07-21 - Path reverse differential diagnostics
+
+Status: implemented and build-verified; physical verification pending.
+
+Completed:
+- Kept all shared `PATH_TRACK_*` parameters and the existing path replay output flow unchanged.
+- Added `speedtest reverse <left_pwm> <right_pwm>` for the current global-reverse differential output.
+- Added `speedtest signed <left_pwm> <right_pwm>` as a comparison-only motor test.
+- Expanded `[PATH_TRACK]` and added immediate `[PATH_DIR]` diagnostics for segment direction, yaw geometry, trim, and PWM values.
+- Keil build: `0 Error(s), 0 Warning(s)`.
+
+Next validation:
+- With wheels raised, capture `speedtest reverse 20 12`, `speedtest reverse 12 20`, `speedtest signed -20 -12`, and `speedtest signed -12 -20`.
+- Then record and replay a forward-to-reverse mixed path using the existing `path record start` / `path replay` commands.
+- Do not change path replay to signed PWM unless the comparison logs prove the current global-reverse output is insufficient.
+
+## 2026-07-21 - INS command stack hardfault guard
+
+Status: implemented; rebuild and on-target verification pending.
+
+Completed:
+- First global-reverse differential test measured `-166/-135 mm/s` at requested PWM `20/12`.
+- Increased `ins_cmd` task stack from 160 to 256 words.
+- Added `stack_min_free` to `speedtest status`.
+
+Next validation:
+- Run `speedtest reverse 20 12` for at least 3 seconds, then `speedtest status` and `speedtest stop`.
+- Require no HardFault and a positive `stack_min_free` value; 32 words or more is the preferred margin.
+
+## 2026-07-21 - Non-blocking UART logging
+
+Status: replaced after boot-time PendSV HardFault; rebuild verified, on-target verification pending.
+
+Completed:
+- Removed the dynamic `log_tx` task and FreeRTOS log queue after an immediate boot HardFault in `PendSV_Handler` found `pxCurrentTCB=0x07070707`.
+- Added two static 128-byte complete records: an ISR-owned active record and one newest pending record. TX interrupt service sends records without character interleaving.
+- A new record replaces only an unsent pending record and increments `log_overwrite`; it never overwrites a partially transmitted active record.
+- RX buffer is 128 bytes (command line remains 80 bytes). Stack-overflow and malloc-failed hooks now report directly through UART then reset. PathTrack and motor control are unchanged.
+
+Next validation:
+- Run each reverse speedtest for at least five seconds, then confirm complete serial records, no HardFault, positive `stack_min_free`, and `log_overwrite=0`.
+
+## 2026-07-21 - UART asynchronous logging rollback
+
+Status: rolled back at user request after repeatable boot-time faults.
+
+- Restored the original direct blocking UART logger, 256-byte RX buffer, and default FreeRTOS stack/malloc hook settings.
+- Removed all TX-interrupt records, dynamic logger task/queue code, and `log_overwrite` status output.
+- Retained reverse/signed speedtest diagnostics and the `ins_cmd` 256-word stack with `stack_min_free` status reporting.

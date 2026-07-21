@@ -26,9 +26,17 @@
 #define SPEEDTEST_PRINT_MS      100U
 #define SPEEDTEST_WHEEL_CIRCUM_UM 150796L
 
+typedef enum {
+    SPEEDTEST_MODE_FORWARD = 0,
+    SPEEDTEST_MODE_REVERSE,
+    SPEEDTEST_MODE_SIGNED
+} SpeedTest_Mode_t;
+
 typedef struct {
     bool running;
-    int16_t pwm;
+    SpeedTest_Mode_t mode;
+    int16_t left_pwm;
+    int16_t right_pwm;
     bool ref_ready;
     int64_t prev_left_total;
     int64_t prev_right_total;
@@ -188,37 +196,81 @@ static int16_t clamp_pwm_arg(int16_t pwm)
     return pwm;
 }
 
+static const char *speedtest_mode_name(SpeedTest_Mode_t mode)
+{
+    switch (mode) {
+        case SPEEDTEST_MODE_FORWARD: return "forward";
+        case SPEEDTEST_MODE_REVERSE: return "reverse";
+        case SPEEDTEST_MODE_SIGNED:  return "signed";
+        default:                     return "unknown";
+    }
+}
+
 static void speedtest_print_help(void)
 {
     LOG_RAW("[SPDTEST] commands:\r\n");
     LOG_RAW("[SPDTEST]   speedtest start <pwm 0..100>\r\n");
+    LOG_RAW("[SPDTEST]   speedtest reverse <left_pwm 0..100> <right_pwm 0..100>\r\n");
+    LOG_RAW("[SPDTEST]   speedtest signed <left_pwm -100..100> <right_pwm -100..100>\r\n");
     LOG_RAW("[SPDTEST]   speedtest stop\r\n");
     LOG_RAW("[SPDTEST]   speedtest status\r\n");
 }
 
-static void speedtest_start(int16_t pwm)
+static void speedtest_start_regular(bool reverse, int16_t left_pwm, int16_t right_pwm)
 {
     memset(&s_speedTest, 0, sizeof(s_speedTest));
     s_speedTest.running = true;
-    s_speedTest.pwm = clamp_pwm_arg(pwm);
-    if (s_speedTest.pwm < 0) {
-        s_speedTest.pwm = (int16_t)-s_speedTest.pwm;
-    }
+    s_speedTest.mode = reverse ? SPEEDTEST_MODE_REVERSE : SPEEDTEST_MODE_FORWARD;
+    s_speedTest.left_pwm = left_pwm;
+    s_speedTest.right_pwm = right_pwm;
     s_speedTest.last_print_tick = xTaskGetTickCount();
 
-    speedtest_send_motor_cmd(MOTOR_CMD_DIR, (int16_t)TB6612_DIR_FORWARD);
-    speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, s_speedTest.pwm);
-    speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, s_speedTest.pwm);
+    speedtest_send_motor_cmd(MOTOR_CMD_DIR,
+                             (int16_t)(reverse ? TB6612_DIR_REVERSE : TB6612_DIR_FORWARD));
+    speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, s_speedTest.left_pwm);
+    speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, s_speedTest.right_pwm);
     speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 1);
-    LOG_RAW("[SPDTEST] start pwm=%d print=%ums\r\n",
-            (int)s_speedTest.pwm,
+    LOG_RAW("[SPDTEST] start mode=%s pwm=%d/%d print=%ums\r\n",
+            speedtest_mode_name(s_speedTest.mode),
+            (int)s_speedTest.left_pwm,
+            (int)s_speedTest.right_pwm,
             (unsigned)SPEEDTEST_PRINT_MS);
+}
+
+static void speedtest_start_signed(int16_t left_pwm, int16_t right_pwm)
+{
+    memset(&s_speedTest, 0, sizeof(s_speedTest));
+    s_speedTest.running = true;
+    s_speedTest.mode = SPEEDTEST_MODE_SIGNED;
+    s_speedTest.left_pwm = clamp_pwm_arg(left_pwm);
+    s_speedTest.right_pwm = clamp_pwm_arg(right_pwm);
+    s_speedTest.last_print_tick = xTaskGetTickCount();
+
+    speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SIGNED_SPEED, s_speedTest.left_pwm);
+    speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SIGNED_SPEED, s_speedTest.right_pwm);
+    speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 1);
+    LOG_RAW("[SPDTEST] start mode=%s pwm=%d/%d print=%ums\r\n",
+            speedtest_mode_name(s_speedTest.mode),
+            (int)s_speedTest.left_pwm,
+            (int)s_speedTest.right_pwm,
+            (unsigned)SPEEDTEST_PRINT_MS);
+}
+
+static void speedtest_start(int16_t pwm)
+{
+    pwm = clamp_pwm_arg(pwm);
+    if (pwm < 0) {
+        pwm = (int16_t)-pwm;
+    }
+    speedtest_start_regular(false, pwm, pwm);
 }
 
 static void speedtest_stop(void)
 {
     speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, 0);
     speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, 0);
+    speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SIGNED_SPEED, 0);
+    speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SIGNED_SPEED, 0);
     speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 0);
     memset(&s_speedTest, 0, sizeof(s_speedTest));
     LOG_RAW("[SPDTEST] stop\r\n");
@@ -226,10 +278,15 @@ static void speedtest_stop(void)
 
 static void speedtest_print_status(void)
 {
-    LOG_RAW("[SPDTEST] run=%u pwm=%d ref=%u\r\n",
+    UBaseType_t stack_free_words = uxTaskGetStackHighWaterMark(NULL);
+
+    LOG_RAW("[SPDTEST] run=%u mode=%s pwm=%d/%d ref=%u stack_min_free=%lu words\r\n",
             s_speedTest.running ? 1U : 0U,
-            (int)s_speedTest.pwm,
-            s_speedTest.ref_ready ? 1U : 0U);
+            speedtest_mode_name(s_speedTest.mode),
+            (int)s_speedTest.left_pwm,
+            (int)s_speedTest.right_pwm,
+            s_speedTest.ref_ready ? 1U : 0U,
+            (unsigned long)stack_free_words);
 }
 
 static void speedtest_tick(void)
@@ -283,8 +340,10 @@ static void speedtest_tick(void)
                  (int32_t)(((int64_t)right_mmps * 100LL) / (int64_t)left_mmps) :
                  0;
 
-    LOG_RAW("[SPDTEST] pwm=%d dt_ms=%lu lc=%ld rc=%ld lmmps=%ld rmmps=%ld ratio_x100=%ld\r\n",
-            (int)s_speedTest.pwm,
+    LOG_RAW("[SPDTEST] mode=%s pwm=%d/%d dt_ms=%lu lc=%ld rc=%ld lmmps=%ld rmmps=%ld ratio_x100=%ld\r\n",
+            speedtest_mode_name(s_speedTest.mode),
+            (int)s_speedTest.left_pwm,
+            (int)s_speedTest.right_pwm,
             (unsigned long)dt_ms,
             (long)left_counts,
             (long)right_counts,
@@ -402,6 +461,37 @@ static bool parse_two_float_args(const char *text, float *a, float *b)
     return end != text;
 }
 
+static bool parse_two_long_args(const char *text, long *a, long *b)
+{
+    char *end = NULL;
+
+    if (text == NULL || a == NULL || b == NULL) {
+        return false;
+    }
+
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *a = strtol(text, &end, 10);
+    if (end == text) {
+        return false;
+    }
+
+    text = end;
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    *b = strtol(text, &end, 10);
+    if (end == text) {
+        return false;
+    }
+
+    while (*end == ' ' || *end == '\t') {
+        end++;
+    }
+    return *end == '\0';
+}
+
 static void parse_line(char *line)
 {
     float value;
@@ -409,6 +499,8 @@ static void parse_line(char *line)
     float x_m;
     float y_m;
     float yaw_deg;
+    long left_pwm;
+    long right_pwm;
     Nav_Command_t navCmd;
 
     while (*line == ' ' || *line == '\t') {
@@ -537,6 +629,22 @@ static void parse_line(char *line)
         speedtest_print_status();
     } else if (str_eq(line, "speedtest stop")) {
         speedtest_stop();
+    } else if (str_prefix(line, "speedtest reverse ")) {
+        if (parse_two_long_args(line + strlen("speedtest reverse "), &left_pwm, &right_pwm) &&
+            left_pwm >= 0L && left_pwm <= 100L &&
+            right_pwm >= 0L && right_pwm <= 100L) {
+            speedtest_start_regular(true, (int16_t)left_pwm, (int16_t)right_pwm);
+        } else {
+            LOG_RAW("[SPDTEST] error: usage speedtest reverse <left_pwm 0..100> <right_pwm 0..100>\r\n");
+        }
+    } else if (str_prefix(line, "speedtest signed ")) {
+        if (parse_two_long_args(line + strlen("speedtest signed "), &left_pwm, &right_pwm) &&
+            left_pwm >= -100L && left_pwm <= 100L &&
+            right_pwm >= -100L && right_pwm <= 100L) {
+            speedtest_start_signed((int16_t)left_pwm, (int16_t)right_pwm);
+        } else {
+            LOG_RAW("[SPDTEST] error: usage speedtest signed <left_pwm -100..100> <right_pwm -100..100>\r\n");
+        }
     } else if (str_prefix(line, "speedtest start ")) {
         char *end = NULL;
         long pwm = strtol(line + strlen("speedtest start "), &end, 10);

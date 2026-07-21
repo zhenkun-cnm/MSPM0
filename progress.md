@@ -351,3 +351,31 @@ if (ret == pdPASS) {
 - PID tuning entry will be TFT (`PID -> PathTrack` later). Non-PID path tracking parameters will be UART (`path tune` later).
 - Created a dedicated human-readable project status text file: `path_replay_reverse_diff_status.txt`.
 - Next implementation step: convert `APP/src/app_path.c` path tracking constants into a runtime config structure, then add UART `path tune` commands.
+
+## 2026-07-21 - Path reverse differential diagnostics
+
+- Replaced the unverified signed-PWM implementation assumption with a diagnostic-first step: forward and reverse replay keep the same `PATH_TRACK_*` parameters and existing global-direction + positive-PWM path output.
+- Added `speedtest reverse <left_pwm> <right_pwm>` to reproduce the current reverse path output, and `speedtest signed <left_pwm> <right_pwm>` as a hardware comparison only.
+- Expanded `[PATH_TRACK]` output with recorded segment yaw, movement heading, segment direction error, track heading, raw/clamped trim, raw PWM, and final PWM; `[PATH_DIR]` prints immediate F/B transitions.
+- Keil build passed with `0 Error(s), 0 Warning(s)`.
+- Pending on-target work: capture reverse and signed speedtest logs before changing any path replay control law.
+
+## 2026-07-21 - INS command stack hardfault guard
+
+- First reverse bench evidence: `speedtest reverse 20 12` reported `-166/-135 mm/s`, confirming the existing global-reverse differential PWM path produces unequal reverse wheel speeds.
+- The next long speedtest log ended in an M0+ HardFault with `PC=0`, consistent with `ins_cmd` stack corruption during formatted logging.
+- Increased `INS_CMD_TASK_STACK_WORDS` from 160 to 256 and added `stack_min_free=<words>` to `speedtest status`.
+- Path replay, PathTrack values, and TB6612 control behavior are unchanged.
+
+## 2026-07-21 - Non-blocking UART logger
+
+- The dynamic `log_tx` queue/task was removed after it caused an immediate boot HardFault in PendSV with `pxCurrentTCB=0x07070707`.
+- UART0 TX interrupt now serializes two static 128-byte records: active transmission plus newest pending. A pending replacement increments `log_overwrite` without blocking the producer.
+- RX buffer is reduced to 128 bytes for the existing 80-byte command line. Stack-overflow level 2 and malloc-failed hooks now report directly through UART then reset.
+
+## 2026-07-21 - UART asynchronous logging rollback
+
+- Per user request, restored direct blocking UART logging and removed both asynchronous logger implementations after boot-time faults.
+- Restored 256-byte RX and default disabled FreeRTOS stack/malloc hooks.
+- Retained speedtest reverse/signed support, `ins_cmd` 256-word stack, and `stack_min_free` status field.
+- Path replay, shared forward/reverse parameters, and TB6612 motor output remain unchanged.

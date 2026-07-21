@@ -263,3 +263,31 @@ Next validation:
 - Confirm startup has no HardFault.
 - Check stack monitor free words after normal path record/replay/save/load.
 - Record and save a path longer than 330 points.
+
+## 2026-07-21 - Path reverse differential diagnostics
+
+Status: implemented and build-verified; physical verification pending.
+
+- Shared PathTrack parameters and path replay output remain unchanged.
+- Added `speedtest reverse <left_pwm> <right_pwm>` and `speedtest signed <left_pwm> <right_pwm>` for encoder-backed comparison.
+- Added expanded `[PATH_TRACK]` and `[PATH_DIR]` diagnostics.
+- Next: capture the four reverse/signed tests, then replay a mixed forward/reverse path.
+
+## 2026-07-21 - INS command stack hardfault guard
+
+- Increased `ins_cmd` stack 160 -> 256 words.
+- `speedtest status` now prints `stack_min_free`.
+- Validate a 3-second `speedtest reverse 20 12` run without HardFault before further reverse tests.
+
+## 2026-07-21 - Non-blocking UART logging
+
+- Replaced the boot-faulting dynamic `log_tx` queue/task with two static 128-byte records driven by UART0 TX interrupt.
+- The active ISR record is never changed; a later record replaces only the pending record and increments `log_overwrite`.
+- RX buffer is 128 bytes for the 80-byte command line. Stack-overflow and malloc-failed hooks report directly through UART then reset. No PathTrack or motor control values changed.
+- Pending target check: five-second reverse tests must show complete records, no HardFault, positive stack margin, and `log_overwrite=0`.
+
+## 2026-07-21 - UART asynchronous logging rollback
+
+- User requested rollback after repeatable boot-time faults.
+- Restored direct blocking UART, 256-byte RX, and default FreeRTOS hook configuration; removed TX-interrupt and queue/task logger code.
+- Kept speedtest diagnostics and `ins_cmd` stack margin reporting.

@@ -151,3 +151,24 @@
 - The motor command layer already has independent signed wheel commands: `MOTOR_CMD_LEFT_SIGNED_SPEED` and `MOTOR_CMD_RIGHT_SIGNED_SPEED`. These are the correct mechanism for backward differential turning.
 - To protect the currently working forward replay behavior, the first implementation should keep forward segments on the existing output path and use signed PWM only for reverse segments.
 - Parameters need to be made tunable before field tuning: PathTrack PID belongs on TFT, while lookahead/base PWM/trim/PWM limits/done distance should be adjusted by UART commands.
+
+## 2026-07-21 - Reverse differential diagnostic decision
+
+- Existing reverse replay already commands unequal PWM with a global reverse direction, so negative signed PWM alone is not assumed to improve steering.
+- PathTrack parameters remain shared between forward and reverse; reverse and signed speedtests will provide encoder-backed evidence before any replay control-law change.
+
+## 2026-07-21 - INS command stack finding
+
+- Global reverse `20/12` produced measured `-166/-135 mm/s`; the differential motor output works.
+- After a PC=0 HardFault during the next long speedtest log, the `ins_cmd` stack was increased from 160 to 256 words and its high-water margin was exposed in `speedtest status`.
+
+## 2026-07-21 - UART logger RAM and serialization finding
+
+- The requested static 12 x 128-byte TX ring could not link: remaining RAM was short by 1504 bytes.
+- The dynamic queue/task fallback failed at boot: PendSV read `pxCurrentTCB=0x07070707`, a FreeRTOS initial-stack register fill value.
+- Two static 128-byte TX records now use UART0 TX interrupt; only the unsent pending record may be replaced, and `LOG_GetOverwriteCount()` reports it.
+
+## 2026-07-21 - UART asynchronous logging rollback
+
+- User selected stability after repeated boot faults. TX-interrupt and queue/task log variants are removed.
+- Direct blocking UART, 256-byte RX, and disabled stack/malloc hooks are restored.

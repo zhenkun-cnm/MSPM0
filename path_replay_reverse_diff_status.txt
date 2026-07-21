@@ -282,7 +282,38 @@ path replay
 - TrimMax 增大。
 - BaseBackPWM 适当提高。
 - Lookahead 减小。
-- PathTrack Kp 增大。
+ - PathTrack Kp 增大。
+
+七、2026-07-21 诊断代码状态
+
+结论更新:
+- 双驱动轮加万向轮底盘的前进和后退共用同一组 PathTrack 参数。
+- 现有后退段已经使用“全局反向 + 左右不同 PWM”。因此只把同一对幅值改成负 signed PWM，不会自动增加差速转弯能力。
+- signed PWM 仅作为执行层对照测试，不在本次接入 path replay。
+
+2026-07-21 首次台架结果和崩溃修复:
+- `speedtest reverse 20 12` 已测得左/右实际速度 `-166/-135 mm/s`，证明现有全局反向加不同 PWM 已能形成倒车差速。
+- 第二条长日志打印时发生 M0+ HardFault（PC=0）。诊断为 `ins_cmd` 任务的 160 words 栈空间不足：该任务保留 UART 行缓冲并调用含 128-byte 格式化缓冲的日志函数，且原来未启用 FreeRTOS 栈溢出检测。
+- `INS_CMD_TASK_STACK_WORDS` 已提升为 256 words；`speedtest status` 新增 `stack_min_free=<words>`，用于确认高水位余量。
+- 本次不修改 PathTrack 参数、path replay 或 TB6612 控制律。
+
+已完成（代码和 Keil 构建验证）:
+- 保持全部 PATH_TRACK 参数和 path replay 的普通 PWM 输出流程不变。
+- 新增 `speedtest reverse <left_pwm> <right_pwm>`，复现 path replay 当前的全局反向差速输出。
+- 新增 `speedtest signed <left_pwm> <right_pwm>`，用于比较独立 signed PWM 的实际轮速结果。
+- `[PATH_TRACK]` 现在输出路径段、记录 yaw、移动方向、段方向误差、跟踪角、原始/限幅 Trim、原始/最终左右 PWM。
+- 前进/后退判定切换时会输出 `[PATH_DIR]` 日志。
+
+现场测试顺序（先将驱动轮架空）:
+1. `speedtest reverse 20 12`，保存至少 2 秒日志。
+2. `speedtest reverse 12 20`，确认左右实际负速度差随请求交换。
+3. `speedtest signed -20 -12` 和 `speedtest signed -12 -20`，与前两项比较。
+4. 录制前进后退混合路径，按原有 `path record start` / `path replay` 流程检查 `[PATH_TRACK]` 与 `[PATH_DIR]`。
+
+结果判定:
+- 若全局反向已经产生正确的左右负速度差，signed PWM 不应加入 path replay；后续只根据路径日志修正控制律或前视/方向判定。
+- 若全局反向的请求 PWM 不同但实际轮速没有差异，优先检查 TB6612、机械死区或编码器数据。
+- 若 signed PWM 与全局反向的实际结果不同，再决定是否在路径回放中采用 signed PWM。
 
 情况 D: 后退拐弯太猛或抖动
 说明:
@@ -293,6 +324,18 @@ path replay
 - Slew 降低。
 - Lookahead 增大。
 
+
+2026-07-21 UART log non-blocking update
+- The dynamic FreeRTOS queue/log_tx fallback caused an immediate boot HardFault: PendSV read pxCurrentTCB=0x07070707, an initial task-stack fill value. It is removed.
+- Normal logs now use UART0 TX interrupt with two static 128-byte records: one active record and one newest pending record. Tasks only copy data under a short critical section and never wait for UART.
+- A new record can replace only the unsent pending record and increments log_overwrite; active output is never overwritten or interleaved. RX buffer is 128 bytes for the existing 80-byte command line.
+- Stack-overflow level 2 and malloc-failed hooks now report direct UART fault text and reset. Path replay and motor control are unchanged.
+
+2026-07-21 UART async logging rollback
+- User chose stability after repeatable boot-time faults. All queue/task and TX-interrupt log changes are removed.
+- UART is restored to original direct blocking output, RX buffer is restored to 256 bytes, and extra FreeRTOS fault hooks are disabled.
+- Reverse speedtest diagnostics, shared path parameters, and motor control remain unchanged.
+- Target verification: run reverse 20/12 and 12/20 for five seconds; require complete records, no HardFault, positive stack_min_free, and log_overwrite=0.
 
 六、当前优先级
 

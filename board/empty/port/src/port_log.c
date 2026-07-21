@@ -14,7 +14,6 @@
 bool g_log_suppress = false;
 
 /* ========== 底层 UART 输出 ========== */
-
 void LOG_OutputChar(char c)
 {
     /* 阻塞发送一个字节 */
@@ -27,7 +26,6 @@ void LOG_OutputChar(char c)
 }
 
 /* ========== 格式化输出引擎 ========== */
-
 void log_printf_internal(const char *fmt, ...)
 {
     char buf[128];
@@ -43,10 +41,10 @@ void log_printf_internal(const char *fmt, ...)
 }
 
 /* ========== JustFloat 原始字节块发送 ========== */
-
 void LOG_SendRawBytes(const uint8_t *data, uint16_t len)
 {
     uint16_t i;
+
     for (i = 0; i < len; i++) {
         DL_UART_Main_transmitDataBlocking(UART0, (uint8_t)data[i]);
     }

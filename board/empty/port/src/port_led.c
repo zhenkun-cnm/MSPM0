@@ -11,8 +11,6 @@
 #include <ti/driverlib/driverlib.h>
 
 /* LED 硬件引脚定义 */
-#define LED_PORT        GPIOB
-#define LED_PIN         DL_GPIO_PIN_22
 
 /* Device 层接口实例 */
 static DevLED s_ledIf;
@@ -22,31 +20,31 @@ static DevLED s_ledIf;
 static void led_init(DevLED *self)
 {
     (void)self;
-    DL_GPIO_clearPins(LED_PORT, LED_PIN);
+    DL_GPIO_clearPins(LED_PORT, LED_PIN_22_PIN);
 }
 
 static void led_on(DevLED *self)
 {
     (void)self;
-    DL_GPIO_setPins(LED_PORT, LED_PIN);
+    DL_GPIO_setPins(LED_PORT, LED_PIN_22_PIN);
 }
 
 static void led_off(DevLED *self)
 {
     (void)self;
-    DL_GPIO_clearPins(LED_PORT, LED_PIN);
+    DL_GPIO_clearPins(LED_PORT, LED_PIN_22_PIN);
 }
 
 static void led_toggle(DevLED *self)
 {
     (void)self;
-    DL_GPIO_togglePins(LED_PORT, LED_PIN);
+    DL_GPIO_togglePins(LED_PORT, LED_PIN_22_PIN);
 }
 
 static DevLED_State_t led_getState(DevLED *self)
 {
     (void)self;
-    return (DL_GPIO_readPins(LED_PORT, LED_PIN) == 0) ?
+    return (DL_GPIO_readPins(LED_PORT, LED_PIN_22_PIN) == 0) ?
            LED_STATE_OFF : LED_STATE_ON;
 }
 

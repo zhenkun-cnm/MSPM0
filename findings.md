@@ -232,3 +232,26 @@ start_task:
 - The motor command layer already has independent signed wheel commands: `MOTOR_CMD_LEFT_SIGNED_SPEED` and `MOTOR_CMD_RIGHT_SIGNED_SPEED`. These are the correct mechanism for backward differential turning.
 - To protect the currently working forward replay behavior, the first implementation should keep forward segments on the existing output path and use signed PWM only for reverse segments.
 - Parameters need to be made tunable before field tuning: PathTrack PID belongs on TFT, while lookahead/base PWM/trim/PWM limits/done distance should be adjusted by UART commands.
+
+## 2026-07-21 - Reverse differential diagnostic decision
+
+- The existing reverse replay already commands unequal left/right PWM under `TB6612_DIR_REVERSE`; replacing equal magnitudes with negative signed PWM alone cannot create additional differential steering authority.
+- The chassis uses the same PathTrack parameters in both directions. No reverse-only RAM configuration or `path tune` interface was added.
+- The next evidence comes from encoder-backed comparison: global reverse unequal PWM versus equal-magnitude signed PWM. Path replay will remain unchanged until those logs identify a controller, motor-output, or encoder issue.
+
+## 2026-07-21 - Reverse differential result and UART stack finding
+
+- `speedtest reverse 20 12` measured `-166/-135 mm/s`; the existing global reverse plus unequal regular PWM already produces an actual reverse speed difference.
+- A subsequent long speedtest log caused an M0+ HardFault with `PC=0`. The `ins_cmd` task had only 160 words despite retaining an 80-byte RX line and calling formatted logging with a 128-byte local buffer.
+- The task stack is increased to 256 words and `speedtest status` reports its high-water free words. Do not infer that `LOG_INFO` itself is the fault: the failing call used `LOG_RAW`, and both macros share the same formatter.
+
+## 2026-07-21 - UART logger RAM and serialization finding
+
+- A 12-record x 128-byte static TX ring plus an active record could not link in the current image: the linker reported a 1504-byte RAM shortfall.
+- The dynamic queue/task fallback then produced an immediate boot HardFault. `PC=0x3DE6` is the PendSV read of the selected TCB, and `pxCurrentTCB=0x07070707` is an initial task-stack register fill value; this is scheduler-state corruption, not a UART peripheral fault.
+- The replacement is two static 128-byte records with UART0 TX interrupt service: one partially/actively sending record and one newest pending record. `LOG_GetOverwriteCount()` increments only when an older unsent pending record is replaced.
+
+## 2026-07-21 - UART asynchronous logging rollback
+
+- The user chose stability over non-blocking logs after repeated boot-time faults.
+- All asynchronous logging variants were removed. UART output is restored to the original direct blocking implementation; stack/malloc hooks are restored to their prior disabled configuration.

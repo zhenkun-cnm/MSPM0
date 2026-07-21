@@ -188,15 +188,16 @@ static float path_distance_to_point(const INS_Pose_t *pose, const Path_Point_t *
     return sqrtf((dx * dx) + (dy * dy));
 }
 
-static bool path_segment_is_reverse(const Path_Point_t *prev,
-                                    const Path_Point_t *target)
+static bool path_segment_get_heading(const Path_Point_t *prev,
+                                     const Path_Point_t *target,
+                                     float *move_heading_deg,
+                                     float *body_error_deg)
 {
     float dx;
     float dy;
-    float move_heading_deg;
-    float body_error_deg;
 
-    if (prev == NULL || target == NULL) {
+    if (prev == NULL || target == NULL ||
+        move_heading_deg == NULL || body_error_deg == NULL) {
         return false;
     }
 
@@ -206,8 +207,21 @@ static bool path_segment_is_reverse(const Path_Point_t *prev,
         return false;
     }
 
-    move_heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;
-    body_error_deg = path_wrap_180(move_heading_deg - prev->yaw_deg);
+    *move_heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;
+    *body_error_deg = path_wrap_180(*move_heading_deg - prev->yaw_deg);
+    return true;
+}
+
+static bool path_segment_is_reverse(const Path_Point_t *prev,
+                                    const Path_Point_t *target)
+{
+    float move_heading_deg;
+    float body_error_deg;
+
+    if (!path_segment_get_heading(prev, target,
+                                  &move_heading_deg, &body_error_deg)) {
+        return false;
+    }
     return fabsf(body_error_deg) > 90.0f;
 }
 
@@ -938,7 +952,12 @@ static void path_update_track(Path_Runtime_t *rt)
     float heading_deg;
     float track_heading_deg;
     float heading_error;
+    float segment_move_heading_deg;
+    float segment_body_error_deg;
+    float trim_raw;
     float trim;
+    float left_pwm_raw;
+    float right_pwm_raw;
     float left_pwm_f;
     float right_pwm_f;
     int16_t left_pwm;
@@ -946,6 +965,7 @@ static void path_update_track(Path_Runtime_t *rt)
     uint16_t done_min_index;
     bool near_final;
     bool reverse_segment;
+    bool direction_changed;
 
     if (rt->state != PATH_STATE_REPLAY_TRACK) {
         return;
@@ -1033,7 +1053,15 @@ static void path_update_track(Path_Runtime_t *rt)
     segment_start = (rt->replay_index > 0U) ?
                     &s_pathPoints[rt->replay_index - 1U] :
                     &s_pathPoints[0U];
-    reverse_segment = path_segment_is_reverse(segment_start, target);
+    if (path_segment_get_heading(segment_start, target,
+                                 &segment_move_heading_deg,
+                                 &segment_body_error_deg)) {
+        reverse_segment = fabsf(segment_body_error_deg) > 90.0f;
+    } else {
+        segment_move_heading_deg = 0.0f;
+        segment_body_error_deg = 0.0f;
+        reverse_segment = false;
+    }
     dx = target->x_m - pose.x_m;                                                        /* 目标方向 X 分量 */
     dy = target->y_m - pose.y_m;                                                        /* 目标方向 Y 分量 */
     target_dist = sqrtf((dx * dx) + (dy * dy));                                          /* 到目标点的直线距离 */
@@ -1046,9 +1074,12 @@ static void path_update_track(Path_Runtime_t *rt)
     heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;                                     /* 计算目标方向角 (deg) */
     track_heading_deg = reverse_segment ? path_wrap_180(heading_deg + 180.0f) : heading_deg;
     heading_error = path_wrap_180(track_heading_deg - pose.yaw_deg);                     /* 航向误差：目标方向 - 当前朝向，正 = 偏左 */
-    trim = path_clamp_f32(heading_error * PATH_TRACK_YAW_KP,                             /* 比例控制：误差 × 增益 */
+    trim_raw = heading_error * PATH_TRACK_YAW_KP;
+    trim = path_clamp_f32(trim_raw,                                                       /* 比例控制：误差 × 增益 */
                           -PATH_TRACK_TRIM_MAX,                                          /* 差速修正限幅：最大 +8 */
                           PATH_TRACK_TRIM_MAX);                                         /* 差速修正限幅：最大 -8 */
+
+    direction_changed = rt->track_motor_started && (rt->track_reverse != reverse_segment);
 
     if (!path_track_switch_direction(rt, reverse_segment)) {
         path_enter_error(rt, "motor dir failed");
@@ -1056,14 +1087,14 @@ static void path_update_track(Path_Runtime_t *rt)
     }
 
     if (reverse_segment) {
-        left_pwm_f = PATH_TRACK_BASE_PWM + trim;
-        right_pwm_f = PATH_TRACK_BASE_PWM - trim;
+        left_pwm_raw = PATH_TRACK_BASE_PWM + trim;
+        right_pwm_raw = PATH_TRACK_BASE_PWM - trim;
     } else {
-        left_pwm_f = PATH_TRACK_BASE_PWM - trim;                                         /* 左轮：基速 - 修正 (偏左时左轮减速) */
-        right_pwm_f = PATH_TRACK_BASE_PWM + trim;                                        /* 右轮：基速 + 修正 (偏左时右轮加速) */
+        left_pwm_raw = PATH_TRACK_BASE_PWM - trim;                                       /* 左轮：基速 - 修正 (偏左时左轮减速) */
+        right_pwm_raw = PATH_TRACK_BASE_PWM + trim;                                      /* 右轮：基速 + 修正 (偏左时右轮加速) */
     }
-    left_pwm_f = path_clamp_f32(left_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);     /* 左轮 PWM 限幅 [6,30] */
-    right_pwm_f = path_clamp_f32(right_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);   /* 右轮 PWM 限幅 [6,30] */
+    left_pwm_f = path_clamp_f32(left_pwm_raw, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);   /* 左轮 PWM 限幅 [6,30] */
+    right_pwm_f = path_clamp_f32(right_pwm_raw, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX); /* 右轮 PWM 限幅 [6,30] */
 
     left_pwm_f = path_slew_f32((float)rt->track_last_left_pwm,                          /* 左轮 PWM 缓变：防突变 */
                                left_pwm_f,
@@ -1094,16 +1125,40 @@ static void path_update_track(Path_Runtime_t *rt)
     rt->track_last_left_pwm = left_pwm;                                                  /* 保存左轮 PWM (用于下次缓变) */
     rt->track_last_right_pwm = right_pwm;                                                /* 保存右轮 PWM */
 
+    if (direction_changed) {
+        log_printf_internal("[PATH_DIR] %c->%c idx=%u seg=%u->%u recYaw=%+.1f move=%+.1f segErr=%+.1f pwm=%d/%d\r\n",
+                            reverse_segment ? 'F' : 'B',
+                            reverse_segment ? 'B' : 'F',
+                            (unsigned)rt->track_target_index,
+                            (unsigned)(rt->track_target_index - 1U),
+                            (unsigned)rt->track_target_index,
+                            segment_start->yaw_deg,
+                            segment_move_heading_deg,
+                            segment_body_error_deg,
+                            (int)rt->track_last_left_pwm,
+                            (int)rt->track_last_right_pwm);
+    }
+
     now = xTaskGetTickCount();
     if (rt->track_last_log_tick == 0U ||                                                /* 首次 或 距上次 >= 500ms */
         ((uint32_t)((now - rt->track_last_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
         rt->track_last_log_tick = now;
-        log_printf_internal("[PATH_TRACK] idx=%u/%u dir=%c dist=%.3f herr=%+.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
+        log_printf_internal("[PATH_TRACK] idx=%u/%u seg=%u->%u dir=%c recYaw=%+.1f move=%+.1f segErr=%+.1f track=%+.1f herr=%+.1f rawTrim=%+.2f trim=%+.2f rawPwm=%.1f/%.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                             (unsigned)rt->track_target_index,                           /* 目标点索引 */
                             (unsigned)s_pathCount,                                      /* 总点数 */
+                            (unsigned)(rt->track_target_index - 1U),
+                            (unsigned)rt->track_target_index,
                             reverse_segment ? 'B' : 'F',
+                            segment_start->yaw_deg,
+                            segment_move_heading_deg,
+                            segment_body_error_deg,
+                            track_heading_deg,
                             rt->track_last_dist_m,                                      /* 到目标距离 */
                             rt->track_last_heading_error_deg,                           /* 航向误差 */
+                            trim_raw,
+                            trim,
+                            left_pwm_raw,
+                            right_pwm_raw,
                             (int)rt->track_last_left_pwm,                               /* 左轮 PWM */
                             (int)rt->track_last_right_pwm,                              /* 右轮 PWM */
                             pose.x_m,                                                   /* 当前 X */

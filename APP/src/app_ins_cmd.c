@@ -427,6 +427,8 @@ static void parse_line(char *line)
         (void)send_ins_cmd(INS_CMD_LOG_OFF);
     } else if (str_eq(line, "ins log print") || str_eq(line, "ins log dump")) {
         (void)send_ins_cmd(INS_CMD_LOG_PRINT);
+    } else if (str_eq(line, "ins flip")) {
+        (void)send_ins_cmd(INS_CMD_FLIP);
     } else if (str_eq(line, "motion help")) {
         (void)send_motion_cmd(MOTION_CMD_HELP, 0.0f);
     } else if (str_eq(line, "motion status")) {

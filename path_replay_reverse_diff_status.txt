@@ -1,0 +1,310 @@
+MSPM0 路径回放后退差速工程说明
+日期: 2026-07-20
+
+一、现在工程里和这个任务有关的文件
+
+1. APP/src/app_path.c
+   作用:
+   - 负责 path record / path replay。
+   - 当前 path replay 使用连续轨迹跟踪。
+   - 已经能记录路径点、选择前视点、计算航向误差、输出左右轮 PWM。
+   - 目前已经有 dir=F / dir=B 的方向识别日志。
+
+   当前问题:
+   - 后退段已经能识别为 dir=B。
+   - 但是后退控制仍主要依赖“全局反向 + 左右正 PWM”。
+   - 这种方式能简单后退，但后退差速拐弯能力不够。
+
+2. APP/src/app_tb6612.c
+   作用:
+   - 负责接收电机命令队列，并控制 TB6612。
+   - 已经支持左右轮独立 signed PWM:
+     MOTOR_CMD_LEFT_SIGNED_SPEED
+     MOTOR_CMD_RIGHT_SIGNED_SPEED
+
+   重要结论:
+   - signed PWM 为正时，该轮前进。
+   - signed PWM 为负时，该轮后退。
+   - 这是实现后退差速拐弯的正确底层接口。
+
+3. APP/inc/app_tb6612.h
+   作用:
+   - 定义电机命令类型。
+   - 已包含 signed speed 命令，不需要新增命令类型。
+
+4. board/empty/port/src/port_tb6612.c
+   作用:
+   - 真正操作 TB6612 方向 GPIO 和 PWM。
+   - 已经有左右轮独立方向设置函数。
+
+5. APP/src/app_tft.c
+   作用:
+   - TFT 菜单。
+   - 后续需要增加 PID -> PathTrack 页面，用来调 PathTrack Kp/Ki/Kd。
+
+6. task_plan.md
+   作用:
+   - 长期任务计划。
+   - 已新增 2026-07-20 Path replay reverse differential tuning 阶段。
+
+7. findings.md
+   作用:
+   - 记录发现和技术判断。
+   - 已记录: INS 不是问题，path replay 控制器才是当前限制。
+
+8. progress.md
+   作用:
+   - 记录每次推进做了什么。
+   - 已记录本工程正式开始，以及下一步实现路线。
+
+
+二、现在的任务是什么
+
+当前任务:
+让 path replay 在后退路径中也能差速拐弯。
+
+更具体地说:
+- 用户手动向后推车，并且后退过程中带弯。
+- path record 记录这条轨迹。
+- path replay 回放时，车应该保持车头方向，不先转 180 度。
+- 车应该倒着沿轨迹走，并能通过左右轮不同速度完成后退拐弯。
+
+现在已经做到:
+- INS 可以记录后退位移。
+- path replay 可以识别 dir=B。
+- 车可以单纯后退。
+
+现在还没做到:
+- 后退时稳定地差速拐弯。
+- 参数可以方便调整。
+
+
+三、需要完成的任务
+
+阶段 1: 计划记录
+状态: 已完成
+
+完成内容:
+- 更新 task_plan.md。
+- 更新 findings.md。
+- 更新 board/empty/keil/findings.md。
+- 更新 progress.md。
+- 创建本文件 path_replay_reverse_diff_status.txt。
+
+
+阶段 2: 参数结构化
+状态: 未完成
+
+目标:
+把 APP/src/app_path.c 里的路径跟踪常量整理成运行时参数。
+
+需要整理的参数:
+- Lookahead: 前视距离。
+- BaseFwdPWM: 前进基础 PWM。
+- BaseBackPWM: 后退基础 PWM。
+- TrimMax: 差速修正最大值。
+- PwmMin: 非零输出最小 PWM。
+- PwmMax: 最大 PWM。
+- Slew: PWM 缓变速度。
+- DoneDist: 终点距离阈值。
+- PathTrack Kp/Ki/Kd: 路径跟踪 PID。
+
+
+阶段 3: 串口调参命令
+状态: 未完成
+
+目标:
+用串口调整非 PID 参数。
+
+建议命令:
+- path tune
+- path tune look <m>
+- path tune base <fwd_pwm> <back_pwm>
+- path tune pwm <min> <max> <slew>
+- path tune trim <max>
+- path tune done <m>
+
+成功标准:
+- 输入 path tune 能打印当前所有参数。
+- 修改参数后，下一次 path replay 立即使用新参数。
+- 不要求掉电保存。
+
+
+阶段 4: TFT PID 菜单
+状态: 未完成
+
+目标:
+在 TFT 菜单里增加 PID -> PathTrack。
+
+TFT 只调:
+- Kp
+- Ki
+- Kd
+
+其他参数继续用串口调。
+
+
+阶段 5: 后退段 signed PWM
+状态: 未完成
+
+目标:
+只在后退段使用左右轮 signed PWM，尽量不影响前进段。
+
+保守策略:
+- 前进段保持当前已有输出方式。
+- 后退段改为:
+  左轮发送 MOTOR_CMD_LEFT_SIGNED_SPEED
+  右轮发送 MOTOR_CMD_RIGHT_SIGNED_SPEED
+
+后退直线示例:
+- left_pwm = -16
+- right_pwm = -16
+
+后退左/右转示例:
+- left_pwm = -22
+- right_pwm = -8
+或:
+- left_pwm = -8
+- right_pwm = -22
+
+注意:
+先允许内侧轮降到 0。
+暂时不默认让一侧前进一侧后退，避免动作太激烈。
+
+
+阶段 6: 现场测试和调参
+状态: 未完成
+
+测试顺序:
+1. 前进直线。
+2. 后退直线。
+3. 后退弯曲。
+4. 前进 + 后退混合轨迹。
+
+每次测试都需要保存串口日志。
+
+
+四、如何验证是否成功
+
+测试 1: 前进段不受影响
+
+操作:
+ins reset
+path clear
+path record start
+向前推一段直线或小弯
+path record stop
+path print
+把车放回起点
+ins reset
+path replay
+
+成功现象:
+- 串口出现 dir=F。
+- 车辆按原来的前进回放方式走。
+- 没有明显比之前更差。
+
+
+测试 2: 后退直线
+
+操作:
+ins reset
+path clear
+path record start
+保持车头不转，向后推一段直线
+path record stop
+path print
+把车放回起点
+ins reset
+path replay
+
+成功现象:
+- 串口出现 dir=B。
+- 后退 signed PWM 阶段完成后，日志应看到负 PWM，例如:
+  pwm=-16/-16
+- 车辆后退，不先转 180 度。
+
+
+测试 3: 后退弯曲
+
+操作:
+ins reset
+path clear
+path record start
+保持车头方向，向后推并带弯
+path record stop
+path print
+把车放回起点
+ins reset
+path replay
+
+成功现象:
+- 串口出现 dir=B。
+- PWM 是负数，并且左右不相等，例如:
+  pwm=-22/-8
+  pwm=-8/-22
+- 车辆倒车时能拐弯，而不是只能直退。
+
+
+测试 4: 混合轨迹
+
+操作:
+记录一段先前进、再后退的轨迹。
+
+成功现象:
+- 前进段日志 dir=F。
+- 后退段日志 dir=B。
+- 前进段不明显退化。
+- 后退段可以拐弯。
+- 方向切换时没有明显抽动、乱转或提前结束。
+
+
+五、判断失败时怎么看
+
+情况 A: 一直是 dir=F
+说明:
+- path replay 没识别出后退段。
+可能原因:
+- 记录点 yaw 不稳定。
+- 路径点之间位移太小。
+- 车被推的时候车头方向和移动方向夹角没有超过 90 度。
+
+情况 B: dir=B 但车还是前进
+说明:
+- signed PWM 或 TB6612 单轮方向映射需要检查。
+下一步:
+- 用 speedtest 或单轮 signed speed 做台架测试。
+
+情况 C: dir=B 且车后退，但不会拐弯
+说明:
+- 后退差速控制参数不够。
+优先调整:
+- TrimMax 增大。
+- BaseBackPWM 适当提高。
+- Lookahead 减小。
+- PathTrack Kp 增大。
+
+情况 D: 后退拐弯太猛或抖动
+说明:
+- 控制太激进。
+优先调整:
+- PathTrack Kp 降低。
+- TrimMax 降低。
+- Slew 降低。
+- Lookahead 增大。
+
+
+六、当前优先级
+
+下一步优先做:
+1. 参数结构化。
+2. path tune 串口调参命令。
+3. 后退段 signed PWM。
+4. TFT PathTrack PID 页面。
+
+不要优先做:
+- 不要改 syscfg。
+- 不要改 M1/M2 编码器。
+- 不要改 INS 后退积分。
+- 不要先改 nav goto。
+- 不要一次性把前进段也换成 signed PWM。

@@ -281,6 +281,7 @@ static void print_help(void)
     LOG_RAW("[INS_CMD]   ins log on\r\n");
     LOG_RAW("[INS_CMD]   ins log off\r\n");
     LOG_RAW("[INS_CMD]   ins log print\r\n");
+    LOG_RAW("[INS_CMD]   ins flip\r\n");
 }
 
 static void print_status(const INS_Pose_t *pose,
@@ -315,6 +316,10 @@ static void handle_commands(INS_Pose_t *pose,
                             bool *havePrevYaw,
                             int32_t *logAccumLeft,
                             int32_t *logAccumRight,
+                            int64_t *prevLeftTotal,
+                            int64_t *prevRightTotal,
+                            uint32_t *prevOdomSeq,
+                            bool *odomRefReady,
                             char yawSource)
 {
     INS_Command_t cmd;
@@ -349,6 +354,18 @@ static void handle_commands(INS_Pose_t *pose,
                 pose->w_dps = 0.0f;
                 pose->left_m = 0.0f;
                 pose->right_m = 0.0f;
+                MotorEncoder_RequestResync();
+                {
+                    MotorEncoderSnapshot_t odom;
+                    if (MotorEncoder_ReadSnapshot(&odom)) {
+                        *prevLeftTotal = odom.left_total_counts;
+                        *prevRightTotal = odom.right_total_counts;
+                        *prevOdomSeq = odom.seq;
+                        *odomRefReady = true;
+                    } else {
+                        *odomRefReady = false;
+                    }
+                }
                 update_flags(pose, true, true, log);
                 LOG_RAW("[INS_CMD] reset ok\r\n");
                 break;
@@ -377,6 +394,21 @@ static void handle_commands(INS_Pose_t *pose,
 
             case INS_CMD_LOG_PRINT:
                 flash_log_print(log);
+                update_flags(pose, imuValid, *yawZeroReady, log);
+                break;
+
+            case INS_CMD_FLIP:
+                MotorEncoder_FlipM2Direction();
+                pose->x_m = 0.0f;
+                pose->y_m = 0.0f;
+                pose->v_mps = 0.0f;
+                pose->w_dps = 0.0f;
+                pose->left_m = 0.0f;
+                pose->right_m = 0.0f;
+                *logAccumLeft = 0;
+                *logAccumRight = 0;
+                *odomRefReady = false;
+                LOG_RAW("[INS_CMD] m2 flip ok\r\n");
                 update_flags(pose, imuValid, *yawZeroReady, log);
                 break;
 
@@ -413,7 +445,7 @@ void ins_task(void *pvParameters)
 
     (void)pvParameters;
 
-    LOG_INFO("[INS] Init: wheel=48mm base=125mm M1L=1054 M2R=985\r\n");
+    LOG_INFO("[INS] Init: wheel=48mm base=125mm M1L=1054 M2R=1054\r\n");
 
     while (1) {
         MotorEncoderSnapshot_t odom;
@@ -462,7 +494,10 @@ void ins_task(void *pvParameters)
             handle_commands(&pose, &flashLog, insReady, imuValid,
                             &yawZeroReady, &yawZero, latestRawYaw,
                             latestRawYawValid, &prevYaw, &havePrevYaw,
-                            &logAccumLeft, &logAccumRight, yawSource);
+                            &logAccumLeft, &logAccumRight,
+                            &prevLeftTotal, &prevRightTotal,
+                            &prevOdomSeq, &odomRefReady,
+                            yawSource);
 
             vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(INS_TASK_PERIOD_MS));
             continue;
@@ -496,6 +531,7 @@ void ins_task(void *pvParameters)
         rightStep = counts_to_m(sumRightCounts,
                                 (float)MOTOR2_COUNTS_PER_OUTPUT_REV_CAL,
                                 INS_RIGHT_SIGN);
+        /* Signed wheel odometry is intentional: backward motion produces negative ds/v_mps. */
         ds = (leftStep + rightStep) * 0.5f;
 
         {
@@ -535,7 +571,10 @@ void ins_task(void *pvParameters)
         handle_commands(&pose, &flashLog, insReady, imuValid,
                         &yawZeroReady, &yawZero, latestRawYaw,
                         latestRawYawValid, &prevYaw, &havePrevYaw,
-                        &logAccumLeft, &logAccumRight, yawSource);
+                        &logAccumLeft, &logAccumRight,
+                        &prevLeftTotal, &prevRightTotal,
+                        &prevOdomSeq, &odomRefReady,
+                        yawSource);
 
         INS_Pose_Write(&pose);
 

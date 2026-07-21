@@ -374,3 +374,44 @@ Next validation:
 - Confirm startup has no HardFault.
 - Check stack monitor free words after normal path record/replay/save/load.
 - Record and save a path longer than 330 points.
+
+## 2026-07-20 - Path replay reverse differential tuning
+
+Status: planning recorded; implementation will proceed step by step.
+
+Goal:
+- Make `path replay` reproduce pushed backward curves, not only straight backward motion.
+- Preserve working forward replay behavior as much as possible.
+- Add tunable parameters before aggressive control changes so each test result can be compared.
+
+Current facts:
+- INS odometry already supports signed backward displacement.
+- TB6612 motor task already supports independent signed wheel commands: `MOTOR_CMD_LEFT_SIGNED_SPEED` and `MOTOR_CMD_RIGHT_SIGNED_SPEED`.
+- Current path tracking has reverse segment detection and `dir=F/B` logs, but reverse tracking still uses a global reverse direction plus positive left/right PWM.
+
+Implementation phases:
+1. [x] Record the engineering plan and create a human-readable project status `.txt`.
+2. [ ] Convert path tracking constants into a runtime tuning config structure.
+3. [ ] Add UART `path tune` commands for non-PID parameters: lookahead, base forward/back PWM, trim max, PWM min/max/slew, done distance.
+4. [ ] Add TFT `PID -> PathTrack` page for Kp/Ki/Kd only.
+5. [ ] Change reverse path tracking to use left/right signed PWM while keeping forward replay on the existing output path initially.
+6. [ ] Run controlled tests: forward straight, backward straight, backward curve, mixed forward/back path.
+7. [ ] Tune parameters from serial logs and record each effective setting.
+
+Validation commands:
+- `path tune`
+- `ins reset`
+- `path clear`
+- `path record start`
+- Push a forward or backward test path.
+- `path record stop`
+- `path print`
+- Return car to recorded start pose.
+- `ins reset`
+- `path replay`
+
+Success criteria:
+- Forward path still logs `dir=F` and behaves like the current known-good replay.
+- Backward straight logs `dir=B` and signed negative PWM after the signed-PWM phase.
+- Backward curve logs unequal negative left/right PWM and physically turns while reversing.
+- Mixed path changes direction without a large jump, spin, or early finish.

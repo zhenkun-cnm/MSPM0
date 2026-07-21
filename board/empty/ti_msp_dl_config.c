@@ -149,6 +149,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 GPIO_TB6612_ENB_C0_IOMUX, GPIO_TB6612_ENB_C0_IOMUX_FUNC,
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+	DL_GPIO_initPeripheralInputFunctionFeatures(
+		 GPIO_TB6612_ENB_C1_IOMUX, GPIO_TB6612_ENB_C1_IOMUX_FUNC,
+		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
     DL_GPIO_initPeripheralInputFunctionFeatures(GPIO_I2C_0_IOMUX_SDA,
         GPIO_I2C_0_IOMUX_SDA_FUNC, DL_GPIO_INVERSION_DISABLE,
@@ -193,10 +197,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
     DL_GPIO_initDigitalInputFeatures(ENCODER_encoderb_IOMUX,
-		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
-		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
-
-    DL_GPIO_initDigitalInputFeatures(ENCODER_M_encoder_IOMUX,
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
@@ -451,41 +451,81 @@ SYSCONFIG_WEAK void SYSCFG_DL_TB6612_ENA_init(void) {
 
 
 /*
- * Timer clock configuration to be sourced by BUSCLK /  (80000000 Hz)
+ * Timer clock configuration to be sourced by BUSCLK /  (10000000 Hz)
  * timerClkFreq = (timerClkSrc / (timerClkDivRatio * (timerClkPrescale + 1)))
- *   80000000 Hz = 80000000 Hz / (1 * (0 + 1))
+ *   1000000 Hz = 10000000 Hz / (8 * (9 + 1))
  */
 static const DL_TimerG_ClockConfig gTB6612_ENBClockConfig = {
     .clockSel    = DL_TIMER_CLOCK_BUSCLK,
-    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
-    .prescale = 0U
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_8,
+    .prescale = 9U
 };
 
 /*
  * Timer load value (where the counter starts from) is calculated as (timerPeriod * timerClockFreq) - 1
- * TB6612_ENB_INST_LOAD_VALUE = (0.8ms * 80000000 Hz) - 1
+ * TB6612_ENB_INST_LOAD_VALUE = (65.536ms * 1000000 Hz) - 1
  */
-static const DL_TimerG_CaptureConfig gTB6612_ENBCaptureConfig = {
-    .captureMode    = DL_TIMER_CAPTURE_MODE_EDGE_TIME,
-    .period         = TB6612_ENB_INST_LOAD_VALUE,
-    .startTimer     = DL_TIMER_STOP,
-    .edgeCaptMode   = DL_TIMER_CAPTURE_EDGE_DETECTION_MODE_RISING,
-    .inputChan      = DL_TIMER_INPUT_CHAN_0,
-    .inputInvMode   = DL_TIMER_CC_INPUT_INV_NOINVERT,
-};
 
 SYSCONFIG_WEAK void SYSCFG_DL_TB6612_ENB_init(void) {
 
     DL_TimerG_setClockConfig(TB6612_ENB_INST,
         (DL_TimerG_ClockConfig *) &gTB6612_ENBClockConfig);
 
-    DL_TimerG_initCaptureMode(TB6612_ENB_INST,
-        (DL_TimerG_CaptureConfig *) &gTB6612_ENBCaptureConfig);
+    DL_TimerG_setLoadValue(TB6612_ENB_INST,65535);
+
+    DL_TimerG_setCounterMode(TB6612_ENB_INST,DL_TIMER_COUNT_MODE_UP);
+
+    DL_TimerG_setCounterRepeatMode(TB6612_ENB_INST,DL_TIMER_REPEAT_MODE_ENABLED);
+
+    DL_TimerG_setCounterValueAfterEnable(TB6612_ENB_INST,DL_TIMER_COUNT_AFTER_EN_ZERO);
+
+    DL_TimerG_setCaptureCompareCtl(TB6612_ENB_INST,
+    DL_TIMER_CC_MODE_CAPTURE, (DL_TIMER_CC_ZCOND_NONE | DL_TIMER_CC_ACOND_TIMCLK | DL_TIMER_CC_CCOND_TRIG_EDGE),
+    DL_TIMER_CC_0_INDEX);
+
+    DL_TimerG_setCaptureCompareInput(TB6612_ENB_INST,
+        DL_TIMER_CC_INPUT_INV_NOINVERT,DL_TIMER_CC_IN_SEL_CCPX, DL_TIMER_CC_0_INDEX);
+
+    DL_TimerG_setCaptureCompareInputFilter(TB6612_ENB_INST,
+        DL_TIMER_CC_INPUT_FILT_CPV_CONSEC_PER,
+        DL_TIMER_CC_INPUT_FILT_FP_PER_3,
+        DL_TIMER_CC_0_INDEX
+    );
+    DL_Timer_enableCaptureCompareInputFilter(TB6612_ENB_INST,
+        DL_TIMER_CC_0_INDEX);
+
+    DL_TimerG_setCaptureCompareCtl(TB6612_ENB_INST,
+    DL_TIMER_CC_MODE_CAPTURE, (DL_TIMER_CC_ZCOND_NONE | DL_TIMER_CC_ACOND_TIMCLK | DL_TIMER_CC_CCOND_TRIG_EDGE),
+    DL_TIMER_CC_1_INDEX);
+
+    DL_TimerG_setCaptureCompareInput(TB6612_ENB_INST,
+        DL_TIMER_CC_INPUT_INV_NOINVERT,DL_TIMER_CC_IN_SEL_CCPX, DL_TIMER_CC_1_INDEX);
+
+    DL_TimerG_setCaptureCompareInputFilter(TB6612_ENB_INST,
+        DL_TIMER_CC_INPUT_FILT_CPV_CONSEC_PER,
+        DL_TIMER_CC_INPUT_FILT_FP_PER_3,
+        DL_TIMER_CC_1_INDEX
+    );
+    DL_Timer_enableCaptureCompareInputFilter(TB6612_ENB_INST,
+        DL_TIMER_CC_1_INDEX);
+
+
+    DL_TimerG_setCounterControl(TB6612_ENB_INST,
+        DL_TIMER_CZC_CCCTL0_ZCOND,
+        DL_TIMER_CAC_CCCTL0_ACOND,
+        DL_TIMER_CLC_CCCTL0_LCOND
+    );
+
     DL_TimerG_enableClock(TB6612_ENB_INST);
 
-    DL_TimerG_enableEvent(TB6612_ENB_INST, DL_TIMERG_EVENT_ROUTE_1, (DL_TIMERG_EVENT_CC0_DN_EVENT));
+    DL_TimerG_enableEvent(TB6612_ENB_INST, DL_TIMERG_EVENT_ROUTE_1, (DL_TIMERG_EVENT_CC0_DN_EVENT |
+		DL_TIMERG_EVENT_CC0_UP_EVENT));
 
     DL_TimerG_setPublisherChanID(TB6612_ENB_INST, DL_TIMERG_PUBLISHER_INDEX_0, TB6612_ENB_INST_PUB_0_CH);
+    DL_TimerG_enableEvent(TB6612_ENB_INST, DL_TIMERG_EVENT_ROUTE_2, (DL_TIMERG_EVENT_CC1_DN_EVENT |
+		DL_TIMERG_EVENT_CC1_UP_EVENT));
+
+    DL_TimerG_setPublisherChanID(TB6612_ENB_INST, DL_TIMERG_PUBLISHER_INDEX_1, TB6612_ENB_INST_PUB_1_CH);
 }
 
 static const DL_I2C_ClockConfig gI2C_0ClockConfig = {
@@ -622,7 +662,7 @@ static const DL_DMA_Config gDMA_CH0Config = {
     .srcIncrement   = DL_DMA_ADDR_UNCHANGED,
     .destWidth      = DL_DMA_WIDTH_WORD,
     .srcWidth       = DL_DMA_WIDTH_WORD,
-    .trigger        = DMA_CH0_TRIGGER_SEL_FSUB_1,
+    .trigger        = DMA_CH0_TRIGGER_SEL_FSUB_0,
     .triggerType    = DL_DMA_TRIGGER_TYPE_EXTERNAL,
 };
 
@@ -631,9 +671,27 @@ SYSCONFIG_WEAK void SYSCFG_DL_DMA_CH0_init(void)
     DL_DMA_setTransferSize(DMA, DMA_CH0_CHAN_ID, 256);
     DL_DMA_initChannel(DMA, DMA_CH0_CHAN_ID , (DL_DMA_Config *) &gDMA_CH0Config);
 }
+static const DL_DMA_Config gDMA_CH1Config = {
+    .transferMode   = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
+    .extendedMode   = DL_DMA_NORMAL_MODE,
+    .destIncrement  = DL_DMA_ADDR_INCREMENT,
+    .srcIncrement   = DL_DMA_ADDR_UNCHANGED,
+    .destWidth      = DL_DMA_WIDTH_WORD,
+    .srcWidth       = DL_DMA_WIDTH_WORD,
+    .trigger        = DMA_CH1_TRIGGER_SEL_FSUB_1,
+    .triggerType    = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_DMA_CH1_init(void)
+{
+    DL_DMA_setTransferSize(DMA, DMA_CH1_CHAN_ID, 256);
+    DL_DMA_initChannel(DMA, DMA_CH1_CHAN_ID , (DL_DMA_Config *) &gDMA_CH1Config);
+}
 SYSCONFIG_WEAK void SYSCFG_DL_DMA_init(void){
-    DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_1, 1);
+    DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_0, 1);
+    DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_1, 2);
     SYSCFG_DL_DMA_CH0_init();
+    SYSCFG_DL_DMA_CH1_init();
 }
 
 

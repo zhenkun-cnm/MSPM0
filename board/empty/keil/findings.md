@@ -128,3 +128,26 @@
 - Long routes can pass physically near their final point before the logical replay index reaches the route tail.
 - Therefore continuous replay completion must be gated by both final-point distance and replay progress.
 - The current guard allows final-distance completion only once `replay_index >= s_pathCount - 3`.
+
+## 2026-07-20 - M2 TIMG7 dual-capture DMA direction finding
+
+- M2 uses PA28/TIMG7_CCP0 and PA31/TIMG7_CCP1 with two DMA timestamp buffers, then decodes in the 10 ms motor encoder task. This avoids edge interrupts and avoids DMA reads from GPIO input registers.
+- A bug caused right-wheel forward and reverse rotation to both count positive: `DL_TimerG_setCaptureCompareInput()` was called with `DL_TIMER_INPUT_CHAN_0/1` as the third argument. That argument is not a channel index; it is a `DL_TIMER_CC_IN_SEL_*` input selector.
+- Passing `DL_TIMER_INPUT_CHAN_1` made CC1 select the paired input, so CC0 and CC1 effectively captured the same edge stream. UART diagnostics showed `Ao == Bo`, `Ac == Bc`, and `Eq == Ac/Bc`, proving both DMA buffers received equal timestamps.
+- The fix is to configure both capture units with `DL_TIMER_CC_IN_SEL_CCPX`, matching SysConfig generated code, so CC0 uses its own CCP0 input and CC1 uses its own CCP1 input.
+- If this failure returns, first check the diagnostic fields: repeated `Eq` equal to the A/B event counts means the problem is event/input selection, not direction sign. Only adjust `ENC2_DIR_SIGN` after A/B timestamps are distinct and forward/reverse are consistently opposite.
+
+## 2026-07-20 - Wheel encoder calibration update
+
+- Current user-measured calibration is 1054 counts per output revolution for both left and right wheels.
+- The theoretical value remains 1040 counts per output revolution, but runtime speed and distance conversion must use the measured 1054 value.
+- The old right-wheel calibration near 985 counts per output revolution is obsolete and must not be used for current INS, Motion, GrayLine, or speedtest calculations.
+- INS odometry remains signed: backward wheel counts are allowed to reduce `left_m`, `right_m`, and `X/Y` through a negative `ds`.
+
+## 2026-07-20 - Path replay reverse differential finding
+
+- The current backward replay problem is not an INS integration problem: INS already supports negative `ds`, negative `v_mps`, and signed `X/Y` updates.
+- The path replay controller is the limiting layer. It can detect reverse segments and print `dir=B`, but reverse tracking still relies on global `TB6612_DIR_REVERSE` plus positive left/right PWM.
+- The motor command layer already has independent signed wheel commands: `MOTOR_CMD_LEFT_SIGNED_SPEED` and `MOTOR_CMD_RIGHT_SIGNED_SPEED`. These are the correct mechanism for backward differential turning.
+- To protect the currently working forward replay behavior, the first implementation should keep forward segments on the existing output path and use signed PWM only for reverse segments.
+- Parameters need to be made tunable before field tuning: PathTrack PID belongs on TFT, while lookahead/base PWM/trim/PWM limits/done distance should be adjusted by UART commands.

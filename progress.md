@@ -342,3 +342,12 @@ if (ret == pdPASS) {
 - The left/right inner speed PID uses the shared `WheelSpd` parameters from Motion, not a separate GrayLine-only parameter group.
 - In practice, most field tuning so far changed the outer loop, `BaseMps`, `TurnMax`, `RevMax`, and `Slew`; the inner speed loop stayed at its default/shared `WheelSpd` settings.
 - The inner loop output is limited by `PwmTrim`, so it is currently a correction on top of speed-to-PWM feedforward rather than the main source of steering authority.
+
+## 2026-07-20 - Path replay reverse differential project started
+
+- User observed that backward replay can move backward, but cannot perform backward differential turning correctly.
+- Decision: treat this as a multi-step tuning project instead of making one large uncontrolled change.
+- Current protective rule: preserve forward replay behavior first; introduce signed wheel PWM only where needed for reverse segments.
+- PID tuning entry will be TFT (`PID -> PathTrack` later). Non-PID path tracking parameters will be UART (`path tune` later).
+- Created a dedicated human-readable project status text file: `path_replay_reverse_diff_status.txt`.
+- Next implementation step: convert `APP/src/app_path.c` path tracking constants into a runtime config structure, then add UART `path tune` commands.

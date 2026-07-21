@@ -72,7 +72,7 @@ Use the `LOG_*` macros from `port_log.h` (`LOG_RAW`/`LOG_ERROR`/`LOG_INFO`/`LOG_
 - **ST7735 TFT**: shares hardware **SPI1** with the Flash (PA17 SCK, PA18 MOSI), plus PB13 RESET, PB12 DC, PB11 CS, PB10 BLK.
 - **ICM-20948 IMU**: **software bit-bang SPI** (PB9 SCK, PB8 MOSI, PB7 MISO, PB6 CS), CPOL=0/CPHA=0, ~150 kHz. Bank-switched registers; WHO_AM_I must read 0xEA. SPI clock is capped (~400 kHz) by an LSF0108 level shifter's RC edges — do not raise the bit-bang frequency. See `c:\ti\mspm0_project\ICM-20948.datasheet.md` for the datasheet cache before re-deriving register details.
 - **8-channel grayscale line sensor**: `Find_Block` uses AD0=PA8, AD1=PB5, AD2=PA9 as mux select outputs and OUT=PB4 as input. The leftmost physical sensor is channel 1; channel numbers increase left-to-right from the car's perspective.
-- **Motor encoder calibration for line-following speed math**: left wheel is 1040 pulses per wheel revolution; right wheel is 985 pulses per wheel revolution. Treat these as the user-confirmed values when converting wheel encoder counts to speed/distance.
+- **Motor encoder calibration for speed/distance math**: theoretical value is 1040 pulses per wheel revolution, but the user-measured calibration is 1054 pulses per wheel revolution for both left and right wheels. Treat 1054 as the user-confirmed value for converting encoder counts to speed/distance.
 
 ## Working Docs
 

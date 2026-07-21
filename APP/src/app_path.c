@@ -110,6 +110,7 @@ typedef struct {
     TickType_t track_last_log_tick;    /* 上次输出轨迹日志的时刻 */
     TickType_t track_near_final_log_tick; /* 上次输出"near final"日志的时刻 */
     bool track_motor_started;          /* 电机是否已启动 */
+    bool track_reverse;
 } Path_Runtime_t;
 
 /**
@@ -187,6 +188,29 @@ static float path_distance_to_point(const INS_Pose_t *pose, const Path_Point_t *
     return sqrtf((dx * dx) + (dy * dy));
 }
 
+static bool path_segment_is_reverse(const Path_Point_t *prev,
+                                    const Path_Point_t *target)
+{
+    float dx;
+    float dy;
+    float move_heading_deg;
+    float body_error_deg;
+
+    if (prev == NULL || target == NULL) {
+        return false;
+    }
+
+    dx = target->x_m - prev->x_m;
+    dy = target->y_m - prev->y_m;
+    if (((dx * dx) + (dy * dy)) < 0.000001f) {
+        return false;
+    }
+
+    move_heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;
+    body_error_deg = path_wrap_180(move_heading_deg - prev->yaw_deg);
+    return fabsf(body_error_deg) > 90.0f;
+}
+
 static float path_clamp_f32(float value, float min_value, float max_value)
 {
     if (value < min_value) {
@@ -253,9 +277,15 @@ static bool path_track_apply_pwm(int16_t left_pwm, int16_t right_pwm)
     return true;
 }
 
-static bool path_track_start_motors(int16_t left_pwm, int16_t right_pwm)
+static bool path_track_set_direction(bool reverse)
 {
-    if (!path_send_motor_cmd(MOTOR_CMD_DIR, (int16_t)TB6612_DIR_FORWARD, pdMS_TO_TICKS(20))) {
+    TB6612_Dir dir = reverse ? TB6612_DIR_REVERSE : TB6612_DIR_FORWARD;
+    return path_send_motor_cmd(MOTOR_CMD_DIR, (int16_t)dir, pdMS_TO_TICKS(20));
+}
+
+static bool path_track_start_motors(bool reverse, int16_t left_pwm, int16_t right_pwm)
+{
+    if (!path_track_set_direction(reverse)) {
         return false;
     }
     if (!path_track_apply_pwm(left_pwm, right_pwm)) {
@@ -264,6 +294,27 @@ static bool path_track_start_motors(int16_t left_pwm, int16_t right_pwm)
     if (!path_send_motor_cmd(MOTOR_CMD_ONOFF, 1, pdMS_TO_TICKS(20))) {
         return false;
     }
+    return true;
+}
+
+static bool path_track_switch_direction(Path_Runtime_t *rt, bool reverse)
+{
+    if (rt == NULL || !rt->track_motor_started ||
+        rt->track_reverse == reverse) {
+        return true;
+    }
+
+    if (!path_track_apply_pwm(0, 0)) {
+        return false;
+    }
+    rt->track_last_left_pwm = 0;
+    rt->track_last_right_pwm = 0;
+
+    if (!path_track_set_direction(reverse)) {
+        return false;
+    }
+
+    rt->track_reverse = reverse;
     return true;
 }
 
@@ -632,12 +683,13 @@ static void path_print_help(void)
 
 static void path_print_status(const Path_Runtime_t *rt)
 {
-    LOG_RAW("[PATH] state=%s count=%u replay=%u/%u target=%u dist=%.3f final=%.3f herr=%+.1f pwm L=%d R=%d wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
+    LOG_RAW("[PATH] state=%s count=%u replay=%u/%u target=%u dir=%c dist=%.3f final=%.3f herr=%+.1f pwm L=%d R=%d wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
             path_state_name(rt->state),
             (unsigned)s_pathCount,
             (unsigned)(rt->replay_index + 1U),
             (unsigned)s_pathCount,
             (unsigned)rt->track_target_index,
+            rt->track_reverse ? 'B' : 'F',
             rt->track_last_dist_m,
             rt->track_last_final_dist_m,
             rt->track_last_heading_error_deg,
@@ -727,6 +779,7 @@ static void path_start_replay(Path_Runtime_t *rt)
     rt->track_last_log_tick = 0U;
     rt->track_near_final_log_tick = 0U;
     rt->track_motor_started = false;
+    rt->track_reverse = false;
     path_reset_motion_wait(rt);
     LOG_RAW("[PATH] replay start count=%u mode=continuous_track\r\n", (unsigned)s_pathCount);
 }
@@ -738,6 +791,7 @@ static void path_stop(Path_Runtime_t *rt)
     rt->state = PATH_STATE_IDLE;
     path_reset_motion_wait(rt);
     rt->track_motor_started = false;
+    rt->track_reverse = false;
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
     rt->track_last_final_dist_m = 0.0f;
@@ -875,12 +929,14 @@ static void path_update_track(Path_Runtime_t *rt)
     INS_Pose_t pose;
     Path_Point_t *target;
     Path_Point_t *final;
+    const Path_Point_t *segment_start;
     TickType_t now;
     float final_dist;
     float target_dist;
     float dx;
     float dy;
     float heading_deg;
+    float track_heading_deg;
     float heading_error;
     float trim;
     float left_pwm_f;
@@ -889,6 +945,7 @@ static void path_update_track(Path_Runtime_t *rt)
     int16_t right_pwm;
     uint16_t done_min_index;
     bool near_final;
+    bool reverse_segment;
 
     if (rt->state != PATH_STATE_REPLAY_TRACK) {
         return;
@@ -927,6 +984,7 @@ static void path_update_track(Path_Runtime_t *rt)
     if (near_final && rt->replay_index >= done_min_index) {
         path_track_stop_motors();
         rt->track_motor_started = false;
+        rt->track_reverse = false;
         rt->track_last_left_pwm = 0;
         rt->track_last_right_pwm = 0;
         rt->track_last_dist_m = final_dist;
@@ -972,6 +1030,10 @@ static void path_update_track(Path_Runtime_t *rt)
     }
 
     target = &s_pathPoints[rt->replay_index];                                           /* 获取目标路点指针 */
+    segment_start = (rt->replay_index > 0U) ?
+                    &s_pathPoints[rt->replay_index - 1U] :
+                    &s_pathPoints[0U];
+    reverse_segment = path_segment_is_reverse(segment_start, target);
     dx = target->x_m - pose.x_m;                                                        /* 目标方向 X 分量 */
     dy = target->y_m - pose.y_m;                                                        /* 目标方向 Y 分量 */
     target_dist = sqrtf((dx * dx) + (dy * dy));                                          /* 到目标点的直线距离 */
@@ -982,13 +1044,24 @@ static void path_update_track(Path_Runtime_t *rt)
     }
 
     heading_deg = atan2f(dy, dx) * PATH_RAD_TO_DEG;                                     /* 计算目标方向角 (deg) */
-    heading_error = path_wrap_180(heading_deg - pose.yaw_deg);                           /* 航向误差：目标方向 - 当前朝向，正 = 偏左 */
+    track_heading_deg = reverse_segment ? path_wrap_180(heading_deg + 180.0f) : heading_deg;
+    heading_error = path_wrap_180(track_heading_deg - pose.yaw_deg);                     /* 航向误差：目标方向 - 当前朝向，正 = 偏左 */
     trim = path_clamp_f32(heading_error * PATH_TRACK_YAW_KP,                             /* 比例控制：误差 × 增益 */
                           -PATH_TRACK_TRIM_MAX,                                          /* 差速修正限幅：最大 +8 */
                           PATH_TRACK_TRIM_MAX);                                         /* 差速修正限幅：最大 -8 */
 
-    left_pwm_f = PATH_TRACK_BASE_PWM - trim;                                             /* 左轮：基速 - 修正 (偏左时左轮减速) */
-    right_pwm_f = PATH_TRACK_BASE_PWM + trim;                                            /* 右轮：基速 + 修正 (偏左时右轮加速) */
+    if (!path_track_switch_direction(rt, reverse_segment)) {
+        path_enter_error(rt, "motor dir failed");
+        return;
+    }
+
+    if (reverse_segment) {
+        left_pwm_f = PATH_TRACK_BASE_PWM + trim;
+        right_pwm_f = PATH_TRACK_BASE_PWM - trim;
+    } else {
+        left_pwm_f = PATH_TRACK_BASE_PWM - trim;                                         /* 左轮：基速 - 修正 (偏左时左轮减速) */
+        right_pwm_f = PATH_TRACK_BASE_PWM + trim;                                        /* 右轮：基速 + 修正 (偏左时右轮加速) */
+    }
     left_pwm_f = path_clamp_f32(left_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);     /* 左轮 PWM 限幅 [6,30] */
     right_pwm_f = path_clamp_f32(right_pwm_f, PATH_TRACK_PWM_MIN, PATH_TRACK_PWM_MAX);   /* 右轮 PWM 限幅 [6,30] */
 
@@ -1004,11 +1077,12 @@ static void path_update_track(Path_Runtime_t *rt)
     right_pwm = path_clamp_pwm(right_pwm_f);
 
     if (!rt->track_motor_started) {                                                     /* 首次启动：需发 DIR + ON */
-        if (!path_track_start_motors(left_pwm, right_pwm)) {
+        if (!path_track_start_motors(reverse_segment, left_pwm, right_pwm)) {
             path_enter_error(rt, "motor start failed");
             return;
         }
         rt->track_motor_started = true;
+        rt->track_reverse = reverse_segment;
     } else if (!path_track_apply_pwm(left_pwm, right_pwm)) {                            /* 运行中：仅更新 PWM */
         path_enter_error(rt, "motor pwm failed");
         return;
@@ -1024,9 +1098,10 @@ static void path_update_track(Path_Runtime_t *rt)
     if (rt->track_last_log_tick == 0U ||                                                /* 首次 或 距上次 >= 500ms */
         ((uint32_t)((now - rt->track_last_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
         rt->track_last_log_tick = now;
-        log_printf_internal("[PATH_TRACK] idx=%u/%u dist=%.3f herr=%+.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
+        log_printf_internal("[PATH_TRACK] idx=%u/%u dir=%c dist=%.3f herr=%+.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                             (unsigned)rt->track_target_index,                           /* 目标点索引 */
                             (unsigned)s_pathCount,                                      /* 总点数 */
+                            reverse_segment ? 'B' : 'F',
                             rt->track_last_dist_m,                                      /* 到目标距离 */
                             rt->track_last_heading_error_deg,                           /* 航向误差 */
                             (int)rt->track_last_left_pwm,                               /* 左轮 PWM */
@@ -1057,6 +1132,7 @@ static void path_update_replay(Path_Runtime_t *rt)
     float radius_m;
     float half_angle_rad;
     int8_t motion_result;
+    bool reverse_segment;
 
     if (rt->state == PATH_STATE_REPLAY_TRACK) {
         path_update_track(rt);
@@ -1091,6 +1167,7 @@ static void path_update_replay(Path_Runtime_t *rt)
     dy = target->y_m - prev->y_m;
     dist = sqrtf((dx * dx) + (dy * dy));
     yaw_delta = path_wrap_180(target->yaw_deg - prev->yaw_deg);
+    reverse_segment = path_segment_is_reverse(prev, target);
 
     if (dist <= PATH_MIN_DRIVE_M && fabsf(yaw_delta) <= PATH_YAW_TOL_DEG) {
         path_advance_replay(rt);
@@ -1102,7 +1179,8 @@ static void path_update_replay(Path_Runtime_t *rt)
         return;
     }
 
-    if (fabsf(yaw_delta) >= PATH_REPLAY_ARC_MIN_YAW_DEG && dist > PATH_MIN_DRIVE_M) {
+    if (!reverse_segment &&
+        fabsf(yaw_delta) >= PATH_REPLAY_ARC_MIN_YAW_DEG && dist > PATH_MIN_DRIVE_M) {
         half_angle_rad = fabsf(yaw_delta) * PATH_DEG_TO_RAD * 0.5f;
         radius_m = dist / (2.0f * sinf(half_angle_rad));
         if (radius_m >= PATH_REPLAY_MIN_ARC_RADIUS_M &&
@@ -1122,7 +1200,8 @@ static void path_update_replay(Path_Runtime_t *rt)
     }
 
     if (dist > PATH_MIN_DRIVE_M) {
-        if (!path_start_motion_step(rt, MOTION_CMD_FWD, dist)) {
+        Motion_CommandType_t drive_type = reverse_segment ? MOTION_CMD_BACK : MOTION_CMD_FWD;
+        if (!path_start_motion_step(rt, drive_type, dist)) {
             path_enter_error(rt, "motion drive failed");
         }
     } else {

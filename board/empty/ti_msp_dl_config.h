@@ -130,13 +130,19 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define TB6612_ENB_INST                                                  (TIMG7)
 #define TB6612_ENB_INST_IRQHandler                              TIMG7_IRQHandler
 #define TB6612_ENB_INST_INT_IRQN                                (TIMG7_INT_IRQn)
-#define TB6612_ENB_INST_LOAD_VALUE                                      (63999U)
+#define TB6612_ENB_INST_LOAD_VALUE                                      (65535U)
 /* GPIO defines for channel 0 */
 #define GPIO_TB6612_ENB_C0_PORT                                            GPIOA
 #define GPIO_TB6612_ENB_C0_PIN                                    DL_GPIO_PIN_28
 #define GPIO_TB6612_ENB_C0_IOMUX                                  (IOMUX_PINCM3)
 #define GPIO_TB6612_ENB_C0_IOMUX_FUNC                 IOMUX_PINCM3_PF_TIMG7_CCP0
+/* GPIO defines for channel 1 */
+#define GPIO_TB6612_ENB_C1_PORT                                            GPIOA
+#define GPIO_TB6612_ENB_C1_PIN                                    DL_GPIO_PIN_31
+#define GPIO_TB6612_ENB_C1_IOMUX                                  (IOMUX_PINCM6)
+#define GPIO_TB6612_ENB_C1_IOMUX_FUNC                 IOMUX_PINCM6_PF_TIMG7_CCP1
 #define TB6612_ENB_INST_PUB_0_CH                                             (1)
+#define TB6612_ENB_INST_PUB_1_CH                                             (2)
 
 
 
@@ -215,8 +221,11 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 
 
 /* Defines for DMA_CH0 */
-#define DMA_CH0_CHAN_ID                                                      (0)
-#define DMA_CH0_TRIGGER_SEL_FSUB_1                       (DMA_GENERIC_SUB1_TRIG)
+#define DMA_CH0_CHAN_ID                                                      (1)
+#define DMA_CH0_TRIGGER_SEL_FSUB_0                       (DMA_GENERIC_SUB0_TRIG)
+/* Defines for DMA_CH1 */
+#define DMA_CH1_CHAN_ID                                                      (0)
+#define DMA_CH1_TRIGGER_SEL_FSUB_1                       (DMA_GENERIC_SUB1_TRIG)
 
 
 /* Port definition for Pin Group LED */
@@ -243,9 +252,6 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 /* Defines for encoderb: GPIOA.25 with pinCMx 55 on package pin 26 */
 #define ENCODER_encoderb_PIN                                    (DL_GPIO_PIN_25)
 #define ENCODER_encoderb_IOMUX                                   (IOMUX_PINCM55)
-/* Defines for M_encoder: GPIOA.29 with pinCMx 4 on package pin 36 */
-#define ENCODER_M_encoder_PIN                                   (DL_GPIO_PIN_29)
-#define ENCODER_M_encoder_IOMUX                                   (IOMUX_PINCM4)
 /* Port definition for Pin Group LCD */
 #define LCD_PORT                                                         (GPIOB)
 

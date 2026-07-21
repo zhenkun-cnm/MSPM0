@@ -52,6 +52,15 @@ static void motorCmdSend(MotorCmdType type, int16_t val)
     xQueueSend(g_motorCmdQueue, &cmd, 0);
 }
 
+static void insCmdSend(INS_CommandType_t type)
+{
+    INS_Command_t cmd;
+
+    if (g_insCmdQueue == NULL) return;
+    cmd.type = type;
+    (void)xQueueSend(g_insCmdQueue, &cmd, 0);
+}
+
 static const MenuItem settingsItems[] = {
     {"Brightness", MENU_VALUE,   NULL, 0, MENU_VAL_INT,   {.i = &g_brightness}, {.i = 0}, {.i = 100}, {.i = 5}},
     {"Contrast",   MENU_VALUE,   NULL, 0, MENU_VAL_INT,   {.i = &g_contrast},   {.i = 0}, {.i = 100}, {.i = 5}},
@@ -160,17 +169,24 @@ static const MenuItem testItems[] = {
 #define TEST_AUTO_INDEX  9U
 #define TEST_ITEM_COUNT  (sizeof(testItems) / sizeof(testItems[0]))
 
+static const MenuItem insViewItems[] = {
+    {"View",       MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"M2 RevFix",  MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+};
+#define INS_VIEW_ITEM_COUNT       (sizeof(insViewItems) / sizeof(insViewItems[0]))
+#define INS_VIEW_PAGE_INDEX       0U
+#define INS_VIEW_M2_REVFIX_INDEX  1U
+
 static const MenuItem rootItems[] = {
     {"Test",       MENU_SUBMENU, testItems,    (uint8_t)TEST_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"PID",        MENU_SUBMENU, pidItems,     (uint8_t)PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Settings",   MENU_SUBMENU, settingsItems, 4, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Sensors",    MENU_SUBMENU, sensorItems,   2, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"INS View",   MENU_LEAF,    NULL,          0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"INS View",   MENU_SUBMENU, insViewItems,  (uint8_t)INS_VIEW_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"About",      MENU_SUBMENU, aboutItems,    3, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 
 #define ROOT_ITEM_COUNT     (sizeof(rootItems) / sizeof(rootItems[0]))
-#define ROOT_INS_VIEW_INDEX 4U
 
 /* ================================================================
  *  Render parameters (1.8" 160x128: 8 rows total, 7 visible + 1 status)
@@ -381,6 +397,13 @@ static bool handle_quick_leaf(const MenuItem *cur, MenuCtx *ctx)
     }
     if (cur == &motorItems[4]) {  /* Right Only */
         motorCmdSend(MOTOR_CMD_RIGHT_ONLY, 0);
+        Menu_Back(ctx);
+        g_scrollOfs = 0;
+        return true;
+    }
+    if (cur == &insViewItems[INS_VIEW_M2_REVFIX_INDEX]) {
+        insCmdSend(INS_CMD_FLIP);
+        g_lastKeyMsg = "M2 RevFixed";
         Menu_Back(ctx);
         g_scrollOfs = 0;
         return true;
@@ -661,7 +684,7 @@ void tft_task(void *pvParameters)
                         menu_render_full(tft, &menuCtx);
                     } else {
                         inLeaf = true;
-                        if (cur == &rootItems[ROOT_INS_VIEW_INDEX]) {
+                        if (cur == &insViewItems[INS_VIEW_PAGE_INDEX]) {
                             g_insViewFirstRender = true;
                             insViewLeaf = true;
                             ins_view_render(tft);

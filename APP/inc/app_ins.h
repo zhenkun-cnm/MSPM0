@@ -32,6 +32,7 @@ typedef enum {
     INS_CMD_LOG_ON,            /**< 开启 Flash 日志记录 */
     INS_CMD_LOG_OFF,           /**< 关闭 Flash 日志记录 */
     INS_CMD_LOG_PRINT,         /**< 打印 Flash 中记录的日志 */
+    INS_CMD_FLIP,              /**< 翻转 M2 编码器方向符号 + 清零位姿 */
 } INS_CommandType_t;
 
 typedef struct {

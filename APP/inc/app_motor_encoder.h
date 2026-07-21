@@ -17,8 +17,7 @@ extern "C" {
 
 #define MOTOR1_COUNTS_PER_OUTPUT_REV_NOMINAL  (1040L)
 #define MOTOR1_COUNTS_PER_OUTPUT_REV_CAL      (1054L)
-#define MOTOR2_COUNTS_PER_OUTPUT_REV_CAL      (985L)
-#define MOTOR2_ENCODER_SOFTWARE_SCALE         (4L)
+#define MOTOR2_COUNTS_PER_OUTPUT_REV_CAL      (1054L)
 #define MOTOR_ENC_PERIOD_MS                   (10U)
 
 typedef struct {
@@ -31,6 +30,8 @@ typedef struct {
 } MotorEncoderSnapshot_t;
 
 bool MotorEncoder_ReadSnapshot(MotorEncoderSnapshot_t *out);
+void MotorEncoder_RequestResync(void);
+void MotorEncoder_FlipM2Direction(void);
 
 /**
  * @brief 电机编码器每 10ms 脉冲增量 (有符号)
@@ -43,14 +44,14 @@ extern int32_t g_motorPulseCount;
 /**
  * @brief 电机2编码器每 10ms 脉冲增量 (有符号)
  * @note  正值=正转增量, 负值=反转增量
- *        TIMG7/DMA 仅捕获 A 相上升沿(1x), App 层乘 4 折算到 4x
- *        减速比 1:20, 实测标定约 985 脉冲/输出轴转
+ *        TIMG7 双通道捕获 + DMA 时间戳软件解码, 已输出 4x 正交计数
+ *        理论 1040 脉冲/输出轴转, 实测标定约 1054 脉冲/输出轴转
  */
 extern int32_t g_motor2PulseCount;
 
 /**
  * @brief 电机编码器采集任务 (双路合并)
- * @note  每 10ms 运行一次, 同时采集 Motor1 (TIMG8 QEI) 和 Motor2 (DMA-GPIO)
+ * @note  每 10ms 运行一次, 同时采集 Motor1 (TIMG8 QEI) 和 Motor2 (TIMG7 dual capture DMA)
  *        分别写入 g_motorPulseCount / g_motor2PulseCount
  */
 void motor_encoder_task(void *pvParameters);

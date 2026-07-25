@@ -19,7 +19,7 @@
 #define PATH_TASK_PERIOD_MS          50U    /* 任务调度周期 (ms) */
 
 /* ===== 路径录制 ===== */
-#define PATH_MAX_POINTS              500U   /* 路径点缓冲区最大容量 */
+#define PATH_MAX_POINTS              292U   /* 日志 DMA 静态 RAM 后仍净释放至少 2 KiB */
 #define PATH_RECORD_MIN_DIST_M       0.05f  /* 触发新录点的最小位置变化 (m) */
 #define PATH_RECORD_MIN_YAW_DEG      5.0f   /* 触发新录点的最小朝向变化 (deg) */
 
@@ -60,20 +60,6 @@
 
 /* 全局路径命令队列，由 UART 命令处理模块发送命令到此队列 */
 QueueHandle_t g_pathCmdQueue = NULL;
-
-/**
- * @brief 路径模块状态机枚举
- */
-typedef enum {
-    PATH_STATE_IDLE = 0,        /* 空闲状态 */
-    PATH_STATE_RECORDING,       /* 正在录制路径 */
-    PATH_STATE_REPLAY_TURN,     /* (旧版分段回放) 正在转向 */
-    PATH_STATE_REPLAY_DRIVE,    /* (旧版分段回放) 正在直驱 */
-    PATH_STATE_REPLAY_SEGMENT,  /* (旧版分段回放) 正在解析下一段 */
-    PATH_STATE_REPLAY_TRACK,    /* (当前使用) 连续轨迹跟踪回放 */
-    PATH_STATE_DONE,            /* 回放完成 */
-    PATH_STATE_ERROR            /* 错误状态 */
-} Path_State_t;
 
 /**
  * @brief 路径点数据结构
@@ -129,6 +115,43 @@ typedef struct __attribute__((packed)) {
 
 static Path_Point_t s_pathPoints[PATH_MAX_POINTS];
 static uint16_t s_pathCount = 0U;
+static bool s_pathOperationOk = false;
+static Path_RuntimeStatus_t s_pathStatus = {
+    PATH_STATE_IDLE, PATH_CMD_STATUS, PATH_RESULT_NONE, PATH_ERROR_NONE,
+    0U, 0U, 0U, 0U
+};
+
+static void path_status_publish(const Path_Runtime_t *rt,
+                                Path_CommandType_t command,
+                                Path_Result_t result,
+                                Path_Error_t error,
+                                bool newResult)
+{
+    taskENTER_CRITICAL();
+    s_pathStatus.state = rt->state;
+    s_pathStatus.point_count = s_pathCount;
+    s_pathStatus.replay_index = rt->replay_index;
+    s_pathStatus.replay_total = s_pathCount;
+    if (newResult) {
+        s_pathStatus.last_command = command;
+        s_pathStatus.result = result;
+        s_pathStatus.error = error;
+        s_pathStatus.sequence++;
+    }
+    taskEXIT_CRITICAL();
+}
+
+bool Path_Status_Read(Path_RuntimeStatus_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+
+    taskENTER_CRITICAL();
+    *out = s_pathStatus;
+    taskEXIT_CRITICAL();
+    return true;
+}
 
 static float path_wrap_180(float deg)
 {
@@ -188,6 +211,33 @@ static float path_distance_to_point(const INS_Pose_t *pose, const Path_Point_t *
     return sqrtf((dx * dx) + (dy * dy));
 }
 
+/**
+ * @brief 计算路径段的移动方向角与车身朝向误差
+ *
+ * 大白话解释：
+ * 假如你从 prev 点走到 target 点，你在地图上走的那个方向（比如往东偏北 30°），
+ * 就叫 move_heading_deg。
+ * 而你当时面朝的方向是 prev->yaw_deg（比如面朝正北 90°）。
+ *
+ * 这两个方向的差值就是 body_error_deg：
+ *   body_error_deg = move_heading_deg - prev->yaw_deg
+ *
+ * 举个例子：
+ *   - 你面朝正北(90°)，要走的方向也是北(90°) → body_error_deg = 0°，直走。
+ *   - 你面朝正北(90°)，要走的方向是南(-90°) → body_error_deg = -180°→180°，倒车。
+ *   - 你面朝正北(90°)，要走的方向是东(0°)   → body_error_deg = -90°，右转横着走。
+ *
+ * 结论：
+ *   - |body_error_deg| <= 90° → 前进就能到
+ *   - |body_error_deg| > 90°  → 需要后退
+ *
+ * @param prev            路径段起点（上一路点）
+ * @param target          路径段终点（当前路点）
+ * @param move_heading_deg [out] 从 prev 指向 target 的方向角 (deg)，0°=东, 90°=北
+ * @param body_error_deg   [out] 车身朝向与移动方向的夹角 (deg)，正=偏左，已归一化到 (-180, 180]
+ * @return true  计算成功
+ * @return false 参数无效或两点重合（距离 < 0.001 mm）
+ */
 static bool path_segment_get_heading(const Path_Point_t *prev,
                                      const Path_Point_t *target,
                                      float *move_heading_deg,
@@ -212,6 +262,19 @@ static bool path_segment_get_heading(const Path_Point_t *prev,
     return true;
 }
 
+/**
+ * @brief 判断当前路径段是否需要倒退行驶（Reverse Direction）
+ *
+ * 计算从 prev 到 target 的空间位移方向与录制时车身朝向（prev->yaw_deg）的夹角
+ * body_error_deg。
+ * 若 |body_error_deg| > 90°，说明车辆需要倒车才能从 prev 移动到 target，
+ * 此时返回 true（后退段）；否则返回 false（前进段）。
+ *
+ * @param prev   路径段起点（上一路点指针）
+ * @param target 路径段终点（当前路点指针）
+ * @return true  需要后退（车身朝向与位移方向夹角 > 90°）
+ * @return false 可以前进（夹角 ≤ 90°）或输入无效
+ */
 static bool path_segment_is_reverse(const Path_Point_t *prev,
                                     const Path_Point_t *target)
 {
@@ -264,7 +327,7 @@ static bool path_send_motor_cmd(MotorCmdType type, int16_t val, TickType_t wait_
     MotorCmd cmd;
 
     if (g_motorCmdQueue == NULL) {
-        LOG_RAW("[PATH] error: motor queue not ready\r\n");
+        LOGE(LOG_MOD_PATH, "error: motor queue not ready\r\n");
         return false;
     }
 
@@ -341,12 +404,12 @@ static bool path_send_motion_raw2(Motion_CommandType_t type, float value, float 
     cmd.cmd_id = cmd_id;
 
     if (g_motionCmdQueue == NULL) {
-        LOG_RAW("[PATH] error: motion queue not ready\r\n");
+        LOGE(LOG_MOD_PATH, "error: motion queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_motionCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[PATH] error: motion queue full\r\n");
+        LOGE(LOG_MOD_PATH, "error: motion queue full\r\n");
         return false;
     }
 
@@ -372,7 +435,7 @@ static bool path_start_motion_step2(Path_Runtime_t *rt, Motion_CommandType_t typ
     uint32_t cmd_id;
 
     if (!path_motion_idle()) {
-        LOG_RAW("[PATH] error: motion busy\r\n");
+        LOGE(LOG_MOD_PATH, "error: motion busy\r\n");
         return false;
     }
 
@@ -390,7 +453,7 @@ static bool path_start_motion_step2(Path_Runtime_t *rt, Motion_CommandType_t typ
     rt->motion_cmd_sent = true;
     rt->motion_accepted = false;
     rt->motion_cmd_tick = xTaskGetTickCount();
-    log_printf_internal("[PATH_STEP] send motion cmd_id=0x%08lX type=%d value=%+.3f value2=%+.3f point=%u/%u\r\n",
+    LOGD(LOG_MOD_PATH, "send motion cmd_id=0x%08lX type=%d value=%+.3f value2=%+.3f point=%u/%u\r\n",
                         (unsigned long)cmd_id,
                         (int)type,
                         value,
@@ -414,7 +477,7 @@ static int8_t path_motion_step_result(Path_Runtime_t *rt)
     }
 
     if (g_motionRtStatus.rejected_cmd_id == rt->waiting_motion_cmd_id) {
-        log_printf_internal("[PATH_STEP] motion rejected cmd_id=0x%08lX\r\n",
+        LOGD(LOG_MOD_PATH, "motion rejected cmd_id=0x%08lX\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id);
         return -1;
     }
@@ -427,7 +490,7 @@ static int8_t path_motion_step_result(Path_Runtime_t *rt)
         if (g_motionRtStatus.last_result == MOTION_RESULT_DONE) {
             return 1;
         }
-        log_printf_internal("[PATH_STEP] motion finished cmd_id=0x%08lX result=%s\r\n",
+        LOGD(LOG_MOD_PATH, "motion finished cmd_id=0x%08lX result=%s\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id,
                             path_motion_result_name(g_motionRtStatus.last_result));
         return -1;
@@ -435,7 +498,7 @@ static int8_t path_motion_step_result(Path_Runtime_t *rt)
 
     elapsed_ms = (uint32_t)((xTaskGetTickCount() - rt->motion_cmd_tick) * portTICK_PERIOD_MS);
     if (!rt->motion_accepted && elapsed_ms >= PATH_MOTION_START_TIMEOUT_MS) {
-        log_printf_internal("[PATH_STEP] motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
+        LOGD(LOG_MOD_PATH, "motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id,
                             (int)g_motionRtStatus.state,
                             (unsigned long)g_motionRtStatus.active_cmd_id,
@@ -471,7 +534,7 @@ static bool path_flash_probe(DevFlash **out_flash)
 
     flash = GetFlash();
     if (flash == NULL) {
-        LOG_RAW("[PATH_FLASH] error: flash handle NULL\r\n");
+        LOGE(LOG_MOD_PATH, "error: flash handle NULL\r\n");
         return false;
     }
 
@@ -479,7 +542,7 @@ static bool path_flash_probe(DevFlash **out_flash)
     if (!flash->readJEDECID(flash, &id) ||
         id.manufacturer != 0xEF ||
         id.memoryType != 0x40) {
-        LOG_RAW("[PATH_FLASH] error: JEDEC invalid\r\n");
+        LOGE(LOG_MOD_PATH, "error: JEDEC invalid\r\n");
         return false;
     }
 
@@ -550,19 +613,20 @@ static void path_save_to_flash(const Path_Runtime_t *rt)
     uint32_t total_bytes;
     uint32_t i;
 
+    s_pathOperationOk = false;
     if (path_is_active(rt)) {
-        LOG_RAW("[PATH_FLASH] error: stop record/replay before save\r\n");
+        LOGE(LOG_MOD_PATH, "error: stop record/replay before save\r\n");
         return;
     }
     if (s_pathCount < 2U) {
-        LOG_RAW("[PATH_FLASH] error: need at least 2 points\r\n");
+        LOGE(LOG_MOD_PATH, "error: need at least 2 points\r\n");
         return;
     }
 
     data_bytes = (uint32_t)s_pathCount * (uint32_t)sizeof(Path_Point_t);
     total_bytes = (uint32_t)sizeof(header) + data_bytes;
     if (total_bytes > PATH_FLASH_BYTES) {
-        LOG_RAW("[PATH_FLASH] error: path too large bytes=%lu\r\n",
+        LOGE(LOG_MOD_PATH, "error: path too large bytes=%lu\r\n",
                 (unsigned long)total_bytes);
         return;
     }
@@ -580,7 +644,7 @@ static void path_save_to_flash(const Path_Runtime_t *rt)
     header.data_bytes = data_bytes;
     header.checksum = path_checksum_bytes((const uint8_t *)s_pathPoints, data_bytes);
 
-    LOG_RAW("[PATH_FLASH] save start addr=0x%08lX count=%u bytes=%lu\r\n",
+    LOGI(LOG_MOD_PATH, "save start addr=0x%08lX count=%u bytes=%lu\r\n",
             (unsigned long)PATH_FLASH_START_ADDR,
             (unsigned)s_pathCount,
             (unsigned long)total_bytes);
@@ -588,7 +652,7 @@ static void path_save_to_flash(const Path_Runtime_t *rt)
     for (i = 0U; i < PATH_FLASH_SECTOR_COUNT; i++) {
         if (!flash->sectorErase(flash,
                                 PATH_FLASH_START_ADDR + (i * PATH_FLASH_SECTOR_SIZE))) {
-            LOG_RAW("[PATH_FLASH] error: erase failed sector=%lu\r\n",
+            LOGE(LOG_MOD_PATH, "error: erase failed sector=%lu\r\n",
                     (unsigned long)i);
             return;
         }
@@ -602,13 +666,14 @@ static void path_save_to_flash(const Path_Runtime_t *rt)
                                   PATH_FLASH_START_ADDR + (uint32_t)sizeof(header),
                                   (const uint8_t *)s_pathPoints,
                                   data_bytes)) {
-        LOG_RAW("[PATH_FLASH] error: write failed\r\n");
+        LOGE(LOG_MOD_PATH, "error: write failed\r\n");
         return;
     }
 
-    LOG_RAW("[PATH_FLASH] save ok count=%u checksum=0x%08lX\r\n",
+    LOGI(LOG_MOD_PATH, "save ok count=%u checksum=0x%08lX\r\n",
             (unsigned)s_pathCount,
             (unsigned long)header.checksum);
+    s_pathOperationOk = true;
 }
 
 static void path_load_from_flash(Path_Runtime_t *rt)
@@ -617,8 +682,9 @@ static void path_load_from_flash(Path_Runtime_t *rt)
     Path_FlashHeader_t header;
     uint32_t checksum;
 
+    s_pathOperationOk = false;
     if (path_is_active(rt)) {
-        LOG_RAW("[PATH_FLASH] error: stop record/replay before load\r\n");
+        LOGE(LOG_MOD_PATH, "error: stop record/replay before load\r\n");
         return;
     }
 
@@ -630,7 +696,7 @@ static void path_load_from_flash(Path_Runtime_t *rt)
                      PATH_FLASH_START_ADDR,
                      (uint8_t *)&header,
                      (uint16_t)sizeof(header))) {
-        LOG_RAW("[PATH_FLASH] error: header read failed\r\n");
+        LOGE(LOG_MOD_PATH, "error: header read failed\r\n");
         return;
     }
 
@@ -640,12 +706,12 @@ static void path_load_from_flash(Path_Runtime_t *rt)
         header.count > PATH_MAX_POINTS ||
         header.count < 2U ||
         header.data_bytes != ((uint32_t)header.count * (uint32_t)sizeof(Path_Point_t))) {
-        LOG_RAW("[PATH_FLASH] error: no valid path in flash\r\n");
+        LOGE(LOG_MOD_PATH, "error: no valid path in flash\r\n");
         return;
     }
 
     if (((uint32_t)sizeof(header) + header.data_bytes) > PATH_FLASH_BYTES) {
-        LOG_RAW("[PATH_FLASH] error: stored path too large\r\n");
+        LOGE(LOG_MOD_PATH, "error: stored path too large\r\n");
         return;
     }
 
@@ -655,7 +721,7 @@ static void path_load_from_flash(Path_Runtime_t *rt)
                      (uint8_t *)s_pathPoints,
                      (uint16_t)header.data_bytes)) {
         s_pathCount = 0U;
-        LOG_RAW("[PATH_FLASH] error: data read failed\r\n");
+        LOGE(LOG_MOD_PATH, "error: data read failed\r\n");
         return;
     }
 
@@ -663,7 +729,7 @@ static void path_load_from_flash(Path_Runtime_t *rt)
     if (checksum != header.checksum) {
         memset(s_pathPoints, 0, sizeof(s_pathPoints));
         s_pathCount = 0U;
-        LOG_RAW("[PATH_FLASH] error: checksum mismatch got=0x%08lX expect=0x%08lX\r\n",
+        LOGE(LOG_MOD_PATH, "error: checksum mismatch got=0x%08lX expect=0x%08lX\r\n",
                 (unsigned long)checksum,
                 (unsigned long)header.checksum);
         return;
@@ -675,29 +741,30 @@ static void path_load_from_flash(Path_Runtime_t *rt)
     rt->track_target_index = 0U;
     path_reset_motion_wait(rt);
 
-    LOG_RAW("[PATH_FLASH] load ok count=%u checksum=0x%08lX\r\n",
+    LOGI(LOG_MOD_PATH, "load ok count=%u checksum=0x%08lX\r\n",
             (unsigned)s_pathCount,
             (unsigned long)checksum);
+    s_pathOperationOk = true;
 }
 
 static void path_print_help(void)
 {
-    LOG_RAW("[PATH] commands:\r\n");
-    LOG_RAW("  path help\r\n");
-    LOG_RAW("  path status\r\n");
-    LOG_RAW("  path clear\r\n");
-    LOG_RAW("  path record start\r\n");
-    LOG_RAW("  path record stop\r\n");
-    LOG_RAW("  path print\r\n");
-    LOG_RAW("  path replay\r\n");
-    LOG_RAW("  path stop\r\n");
-    LOG_RAW("  path save\r\n");
-    LOG_RAW("  path load\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path help\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path status\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path clear\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path record start\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path record stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path print\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path replay\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path save\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path load\r\n");
 }
 
 static void path_print_status(const Path_Runtime_t *rt)
 {
-    LOG_RAW("[PATH] state=%s count=%u replay=%u/%u target=%u dir=%c dist=%.3f final=%.3f herr=%+.1f pwm L=%d R=%d wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
+    LOGI_RELIABLE(LOG_MOD_PATH, "state=%s count=%u replay=%u/%u target=%u dir=%c dist=%.3f final=%.3f herr=%+.1f pwm L=%d R=%d wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
             path_state_name(rt->state),
             (unsigned)s_pathCount,
             (unsigned)(rt->replay_index + 1U),
@@ -720,9 +787,9 @@ static void path_print_points(void)
 {
     uint16_t i;
 
-    LOG_RAW("[PATH] points count=%u\r\n", (unsigned)s_pathCount);
+    LOGI(LOG_MOD_PATH, "points count=%u\r\n", (unsigned)s_pathCount);
     for (i = 0U; i < s_pathCount; i++) {
-        LOG_RAW("[PATH_PT] #%02u X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
+        LOGI(LOG_MOD_PATH, "#%02u X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                 (unsigned)i,
                 s_pathPoints[i].x_m,
                 s_pathPoints[i].y_m,
@@ -740,15 +807,18 @@ static void path_enter_error(Path_Runtime_t *rt, const char *reason)
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
     rt->track_last_final_dist_m = 0.0f;
-    LOG_RAW("[PATH] error: %s\r\n", reason);
+    LOGE(LOG_MOD_PATH, "error: %s\r\n", reason);
+    path_status_publish(rt, PATH_CMD_REPLAY, PATH_RESULT_ERROR,
+                        PATH_ERROR_MOTION, true);
 }
 
 static void path_start_record(Path_Runtime_t *rt)
 {
     INS_Pose_t pose;
 
+    s_pathOperationOk = false;
     if (!path_get_pose(&pose)) {
-        LOG_RAW("[PATH] error: INS not ready\r\n");
+        LOGE(LOG_MOD_PATH, "error: INS not ready\r\n");
         return;
     }
 
@@ -758,27 +828,31 @@ static void path_start_record(Path_Runtime_t *rt)
     rt->state = PATH_STATE_RECORDING;
     rt->replay_index = 0U;
     path_reset_motion_wait(rt);
-    LOG_RAW("[PATH] record start\r\n");
+    LOGI(LOG_MOD_PATH, "record start\r\n");
+    s_pathOperationOk = true;
 }
 
 static void path_stop_record(Path_Runtime_t *rt)
 {
+    s_pathOperationOk = false;
     if (rt->state == PATH_STATE_RECORDING) {
         rt->state = PATH_STATE_IDLE;
-        LOG_RAW("[PATH] record stop count=%u\r\n", (unsigned)s_pathCount);
+        LOGI(LOG_MOD_PATH, "record stop count=%u\r\n", (unsigned)s_pathCount);
+        s_pathOperationOk = true;
     } else {
-        LOG_RAW("[PATH] record not active\r\n");
+        LOGI(LOG_MOD_PATH, "record not active\r\n");
     }
 }
 
 static void path_start_replay(Path_Runtime_t *rt)
 {
+    s_pathOperationOk = false;
     if (s_pathCount < 2U) {
-        LOG_RAW("[PATH] error: need at least 2 points\r\n");
+        LOGE(LOG_MOD_PATH, "error: need at least 2 points\r\n");
         return;
     }
     if (!path_motion_idle()) {
-        LOG_RAW("[PATH] error: motion busy\r\n");
+        LOGE(LOG_MOD_PATH, "error: motion busy\r\n");
         return;
     }
 
@@ -795,7 +869,8 @@ static void path_start_replay(Path_Runtime_t *rt)
     rt->track_motor_started = false;
     rt->track_reverse = false;
     path_reset_motion_wait(rt);
-    LOG_RAW("[PATH] replay start count=%u mode=continuous_track\r\n", (unsigned)s_pathCount);
+    LOGI(LOG_MOD_PATH, "replay start count=%u mode=continuous_track\r\n", (unsigned)s_pathCount);
+    s_pathOperationOk = true;
 }
 
 static void path_stop(Path_Runtime_t *rt)
@@ -809,7 +884,8 @@ static void path_stop(Path_Runtime_t *rt)
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
     rt->track_last_final_dist_m = 0.0f;
-    LOG_RAW("[PATH] stop ok\r\n");
+    LOGI(LOG_MOD_PATH, "stop ok\r\n");
+    s_pathOperationOk = true;
 }
 
 static void path_handle_command(Path_Runtime_t *rt, const Path_Command_t *cmd)
@@ -827,36 +903,59 @@ static void path_handle_command(Path_Runtime_t *rt, const Path_Command_t *cmd)
             break;
         case PATH_CMD_CLEAR:
             if (rt->state == PATH_STATE_RECORDING) {
-                LOG_RAW("[PATH] error: stop record before clear\r\n");
+                LOGE(LOG_MOD_PATH, "error: stop record before clear\r\n");
             } else {
                 s_pathCount = 0U;
                 memset(s_pathPoints, 0, sizeof(s_pathPoints));
-                LOG_RAW("[PATH] clear ok\r\n");
+                LOGI(LOG_MOD_PATH, "clear ok\r\n");
             }
             break;
         case PATH_CMD_RECORD_START:
             path_start_record(rt);
+            path_status_publish(rt, cmd->type,
+                                s_pathOperationOk ? PATH_RESULT_OK : PATH_RESULT_ERROR,
+                                s_pathOperationOk ? PATH_ERROR_NONE : PATH_ERROR_INS_NOT_READY,
+                                true);
             break;
         case PATH_CMD_RECORD_STOP:
             path_stop_record(rt);
+            path_status_publish(rt, cmd->type,
+                                s_pathOperationOk ? PATH_RESULT_OK : PATH_RESULT_ERROR,
+                                s_pathOperationOk ? PATH_ERROR_NONE : PATH_ERROR_ACTIVE,
+                                true);
             break;
         case PATH_CMD_PRINT:
             path_print_points();
             break;
         case PATH_CMD_REPLAY:
             path_start_replay(rt);
+            path_status_publish(rt, cmd->type,
+                                s_pathOperationOk ? PATH_RESULT_RUNNING : PATH_RESULT_ERROR,
+                                s_pathOperationOk ? PATH_ERROR_NONE :
+                                ((s_pathCount < 2U) ? PATH_ERROR_TOO_SHORT : PATH_ERROR_MOTION_BUSY),
+                                true);
             break;
         case PATH_CMD_STOP:
             path_stop(rt);
+            path_status_publish(rt, cmd->type, PATH_RESULT_OK,
+                                PATH_ERROR_NONE, true);
             break;
         case PATH_CMD_SAVE:
             path_save_to_flash(rt);
+            path_status_publish(rt, cmd->type,
+                                s_pathOperationOk ? PATH_RESULT_OK : PATH_RESULT_ERROR,
+                                s_pathOperationOk ? PATH_ERROR_NONE : PATH_ERROR_FLASH,
+                                true);
             break;
         case PATH_CMD_LOAD:
             path_load_from_flash(rt);
+            path_status_publish(rt, cmd->type,
+                                s_pathOperationOk ? PATH_RESULT_OK : PATH_RESULT_ERROR,
+                                s_pathOperationOk ? PATH_ERROR_NONE : PATH_ERROR_FLASH,
+                                true);
             break;
         default:
-            LOG_RAW("[PATH] error: bad command\r\n");
+            LOGE(LOG_MOD_PATH, "error: bad command\r\n");
             break;
     }
 }
@@ -899,9 +998,9 @@ static void path_update_record(Path_Runtime_t *rt)
     if (dist >= PATH_RECORD_MIN_DIST_M || yaw_delta >= PATH_RECORD_MIN_YAW_DEG) {
         if (!path_add_point(&pose)) {
             rt->state = PATH_STATE_IDLE;
-            LOG_RAW("[PATH] record full count=%u\r\n", (unsigned)s_pathCount);
+            LOGI(LOG_MOD_PATH, "record full count=%u\r\n", (unsigned)s_pathCount);
         } else {
-            LOG_RAW("[PATH] record point #%u X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
+            LOGI(LOG_MOD_PATH, "record point #%u X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                     (unsigned)(s_pathCount - 1U),
                     pose.x_m,
                     pose.y_m,
@@ -916,7 +1015,9 @@ static void path_advance_replay(Path_Runtime_t *rt)
     path_reset_motion_wait(rt);
     if (rt->replay_index >= s_pathCount) {
         rt->state = PATH_STATE_DONE;
-        LOG_RAW("[PATH] replay done count=%u\r\n", (unsigned)s_pathCount);
+        path_status_publish(rt, PATH_CMD_REPLAY, PATH_RESULT_DONE,
+                            PATH_ERROR_NONE, true);
+        LOGI(LOG_MOD_PATH, "replay done count=%u\r\n", (unsigned)s_pathCount);
     } else {
         rt->state = PATH_STATE_REPLAY_SEGMENT;
     }
@@ -940,32 +1041,32 @@ static void path_advance_replay(Path_Runtime_t *rt)
  */
 static void path_update_track(Path_Runtime_t *rt)
 {
-    INS_Pose_t pose;
-    Path_Point_t *target;
-    Path_Point_t *final;
-    const Path_Point_t *segment_start;
-    TickType_t now;
-    float final_dist;
-    float target_dist;
-    float dx;
-    float dy;
-    float heading_deg;
-    float track_heading_deg;
-    float heading_error;
-    float segment_move_heading_deg;
-    float segment_body_error_deg;
-    float trim_raw;
-    float trim;
-    float left_pwm_raw;
-    float right_pwm_raw;
-    float left_pwm_f;
-    float right_pwm_f;
-    int16_t left_pwm;
-    int16_t right_pwm;
-    uint16_t done_min_index;
-    bool near_final;
-    bool reverse_segment;
-    bool direction_changed;
+    INS_Pose_t pose;                                      /*!< 当前 INS 位姿（含坐标和朝向） */
+    Path_Point_t *target;                                 /*!< 当前跟踪的目标路点指针 */
+    Path_Point_t *final;                                  /*!< 路径终点指针（最后一个路点） */
+    const Path_Point_t *segment_start;                    /*!< 当前路段起点（上一路点，用于判定前进/后退） */
+    TickType_t now;                                      /*!< 当前系统 tick，用于日志降频 */
+    float final_dist;                                     /*!< 当前位置到终点的欧氏距离 (m) */
+    float target_dist;                                    /*!< 当前位置到目标路点的欧氏距离 (m) */
+    float dx;                                             /*!< 目标路点相对当前位置的 X 轴偏移 (m)，target->x_m - pose.x_m */
+    float dy;                                             /*!< 目标路点相对当前位置的 Y 轴偏移 (m)，target->y_m - pose.y_m */
+    float heading_deg;                                    /*!< 从当前位置指向目标路点的期望方向角 (deg)，atan2(dy, dx) */
+    float track_heading_deg;                              /*!< 实际跟踪方向角 (deg)：前进段 = heading_deg，后退段 = heading_deg + 180° */
+    float heading_error;                                  /*!< 航向误差 (deg)：正 = 偏左，已归一化到 (-180, 180] */
+    float segment_move_heading_deg;                       /*!< 当前路段 from prev to target 的空间位移方向角 (deg) */
+    float segment_body_error_deg;                         /*!< 路段位移方向与录制时车身朝向的夹角 (deg) */
+    float trim_raw;                                       /*!< 未经限幅的差速修正量 (PWM) */
+    float trim;                                           /*!< 限幅后的差速修正量 (PWM)，范围 [-8, 8] */
+    float left_pwm_raw;                                   /*!< 未限幅的左轮目标 PWM */
+    float right_pwm_raw;                                  /*!< 未限幅的右轮目标 PWM */
+    float left_pwm_f;                                     /*!< 缓变后的左轮 PWM（浮点中间值） */
+    float right_pwm_f;                                    /*!< 缓变后的右轮 PWM（浮点中间值） */
+    int16_t left_pwm;                                     /*!< 最终输出左轮 PWM（整数） */
+    int16_t right_pwm;                                    /*!< 最终输出右轮 PWM（整数） */
+    uint16_t done_min_index;                              /*!< 允许判定到达终点的最小 replay_index（防提前完成保护） */
+    bool near_final;                                      /*!< 是否已临近终点：final_dist <= COMPLETE_DIST_M (0.06m) */
+    bool reverse_segment;                                 /*!< 当前路段是否需要倒车行驶 */
+    bool direction_changed;                               /*!< 行进方向是否刚发生切换（前进↔后退） */
 
     if (rt->state != PATH_STATE_REPLAY_TRACK) {
         return;
@@ -1010,7 +1111,9 @@ static void path_update_track(Path_Runtime_t *rt)
         rt->track_last_dist_m = final_dist;
         rt->state = PATH_STATE_DONE;
         path_reset_motion_wait(rt);
-        LOG_RAW("[PATH] replay done track dist=%.3f X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
+        path_status_publish(rt, PATH_CMD_REPLAY, PATH_RESULT_DONE,
+                            PATH_ERROR_NONE, true);
+        LOGI(LOG_MOD_PATH, "replay done track dist=%.3f X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                 final_dist,
                 pose.x_m,
                 pose.y_m,
@@ -1027,7 +1130,7 @@ static void path_update_track(Path_Runtime_t *rt)
         if (rt->track_near_final_log_tick == 0U ||
             ((uint32_t)((now - rt->track_near_final_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
             rt->track_near_final_log_tick = now;
-            log_printf_internal("[PATH_TRACK] near final ignored idx=%u/%u final_dist=%.3f done_idx=%u\r\n",
+            LOGD(LOG_MOD_PATH, "near final ignored idx=%u/%u final_dist=%.3f done_idx=%u\r\n",
                                 (unsigned)rt->replay_index,
                                 (unsigned)s_pathCount,
                                 final_dist,
@@ -1062,6 +1165,7 @@ static void path_update_track(Path_Runtime_t *rt)
         segment_body_error_deg = 0.0f;
         reverse_segment = false;
     }
+
     dx = target->x_m - pose.x_m;                                                        /* 目标方向 X 分量 */
     dy = target->y_m - pose.y_m;                                                        /* 目标方向 Y 分量 */
     target_dist = sqrtf((dx * dx) + (dy * dy));                                          /* 到目标点的直线距离 */
@@ -1075,9 +1179,9 @@ static void path_update_track(Path_Runtime_t *rt)
     track_heading_deg = reverse_segment ? path_wrap_180(heading_deg + 180.0f) : heading_deg;
     heading_error = path_wrap_180(track_heading_deg - pose.yaw_deg);                     /* 航向误差：目标方向 - 当前朝向，正 = 偏左 */
     trim_raw = heading_error * PATH_TRACK_YAW_KP;
-    trim = path_clamp_f32(trim_raw,                                                       /* 比例控制：误差 × 增益 */
-                          -PATH_TRACK_TRIM_MAX,                                          /* 差速修正限幅：最大 +8 */
-                          PATH_TRACK_TRIM_MAX);                                         /* 差速修正限幅：最大 -8 */
+    trim = path_clamp_f32(trim_raw,
+                          -PATH_TRACK_TRIM_MAX,
+                          PATH_TRACK_TRIM_MAX);
 
     direction_changed = rt->track_motor_started && (rt->track_reverse != reverse_segment);
 
@@ -1126,7 +1230,7 @@ static void path_update_track(Path_Runtime_t *rt)
     rt->track_last_right_pwm = right_pwm;                                                /* 保存右轮 PWM */
 
     if (direction_changed) {
-        log_printf_internal("[PATH_DIR] %c->%c idx=%u seg=%u->%u recYaw=%+.1f move=%+.1f segErr=%+.1f pwm=%d/%d\r\n",
+        LOGD(LOG_MOD_PATH, "%c->%c idx=%u seg=%u->%u recYaw=%+.1f move=%+.1f segErr=%+.1f pwm=%d/%d\r\n",
                             reverse_segment ? 'F' : 'B',
                             reverse_segment ? 'B' : 'F',
                             (unsigned)rt->track_target_index,
@@ -1143,7 +1247,7 @@ static void path_update_track(Path_Runtime_t *rt)
     if (rt->track_last_log_tick == 0U ||                                                /* 首次 或 距上次 >= 500ms */
         ((uint32_t)((now - rt->track_last_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
         rt->track_last_log_tick = now;
-        log_printf_internal("[PATH_TRACK] idx=%u/%u seg=%u->%u dir=%c recYaw=%+.1f move=%+.1f segErr=%+.1f track=%+.1f herr=%+.1f rawTrim=%+.2f trim=%+.2f rawPwm=%.1f/%.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
+        LOGD(LOG_MOD_PATH, "idx=%u/%u seg=%u->%u dir=%c recYaw=%+.1f move=%+.1f segErr=%+.1f track=%+.1f herr=%+.1f rawTrim=%+.2f trim=%+.2f rawPwm=%.1f/%.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                             (unsigned)rt->track_target_index,                           /* 目标点索引 */
                             (unsigned)s_pathCount,                                      /* 总点数 */
                             (unsigned)(rt->track_target_index - 1U),
@@ -1272,8 +1376,8 @@ void path_task(void *pvParameters)
     (void)pvParameters;
     memset(&rt, 0, sizeof(rt));
     rt.state = PATH_STATE_IDLE;
-
-    LOG_INFO("[PATH] task ready: path help\r\n");
+    path_status_publish(&rt, PATH_CMD_STATUS, PATH_RESULT_NONE,
+                        PATH_ERROR_NONE, true);
 
     while (1) {
         while (g_pathCmdQueue != NULL &&
@@ -1283,6 +1387,8 @@ void path_task(void *pvParameters)
 
         path_update_record(&rt);
         path_update_replay(&rt);
+        path_status_publish(&rt, PATH_CMD_STATUS, PATH_RESULT_NONE,
+                            PATH_ERROR_NONE, false);
         vTaskDelay(pdMS_TO_TICKS(PATH_TASK_PERIOD_MS));
     }
 }

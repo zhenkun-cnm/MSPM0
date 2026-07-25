@@ -265,7 +265,7 @@ void PORT_MOTOR_ENCODER2_Init(void)
 
     DL_TimerG_startCounter(TB6612_ENB_INST);
 
-    LOG_INFO("[ENC2] TIMG7 dual capture DMA initialized A=PA28 B=PA31 state=%u\r\n",
+    LOGI_INIT(LOG_MOD_MOTOR, "TIMG7 dual capture DMA initialized A=PA28 B=PA31 state=%u\r\n",
         s_abState);
 }
 
@@ -365,7 +365,7 @@ void PORT_MOTOR_ENCODER2_Poll(int32_t *deltaPulses)
     s_diagCounter++;
     if (s_diagCounter >= 100U) {
         s_diagCounter = 0;
-        LOG_DEBUG("[ENC2] Aoff=%lu Boff=%lu AB=%u invalid=%lu overrun=%lu\r\n",
+        LOGD(LOG_MOD_MOTOR, "Aoff=%lu Boff=%lu AB=%u invalid=%lu overrun=%lu\r\n",
             (unsigned long) aWrite,
             (unsigned long) bWrite,
             (unsigned int) s_abState,

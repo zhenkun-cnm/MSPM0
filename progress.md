@@ -358,6 +358,10 @@ if (ret == pdPASS) {
 - Added `speedtest reverse <left_pwm> <right_pwm>` to reproduce the current reverse path output, and `speedtest signed <left_pwm> <right_pwm>` as a hardware comparison only.
 - Expanded `[PATH_TRACK]` output with recorded segment yaw, movement heading, segment direction error, track heading, raw/clamped trim, raw PWM, and final PWM; `[PATH_DIR]` prints immediate F/B transitions.
 - Keil build passed with `0 Error(s), 0 Warning(s)`.
+
+## 2026-07-21 - GrayLine TFT small-gain precision
+
+- TFT float rendering now shows four decimal places for menu items with a step below `0.001`. `RateKp`, `RateKi`, and `RateKd` use a `0.0001` step, so `0.0012` is now visible and can be verified on screen.
 - Pending on-target work: capture reverse and signed speedtest logs before changing any path replay control law.
 
 ## 2026-07-21 - INS command stack hardfault guard
@@ -379,3 +383,57 @@ if (ret == pdPASS) {
 - Restored 256-byte RX and default disabled FreeRTOS stack/malloc hooks.
 - Retained speedtest reverse/signed support, `ins_cmd` 256-word stack, and `stack_min_free` status field.
 - Path replay, shared forward/reverse parameters, and TB6612 motor output remain unchanged.
+
+## 2026-07-21 - GrayLine yaw-rate damping loop
+
+- GrayLine now runs a 100 Hz yaw-rate damping loop using calibrated ICM gyro-Z data. It keeps the existing position PID feed-forward and adds a bounded yaw-rate correction.
+- Default rate settings: `RateKp=0.0008`, `RateKi=0`, `RateKd=0`, `RateMax=180 dps`, `RateTrim=0.060 m/s`.
+- Added five TFT parameters under `PID -> GrayLine`; no UART tuning command was added.
+- JustFloat is now 17 channels at 50 Hz: original channels 0-9 are retained; channels 10-16 are position feed-forward, direct target rate, actual rate, rate error, rate trim, and active flag. Control remains 100 Hz because UART transmission is blocking.
+- IMU read failure marks the rate inactive and safely continues the established position-only line-following behavior.
+- Keil build passed with `0 Error(s), 0 Warning(s)`.
+
+## 2026-07-21 - GrayLine direct-turn correction
+
+- Removed `RateSlew`: it incorrectly replaced the gray-position steering feed-forward with a limited yaw-rate command and made sharp curves understeer.
+- GrayLine now sends the position-loop turn command directly to the wheels; the yaw-rate PID only adds a bounded damping trim. Existing PWM slew remains the physical output smoothing mechanism.
+
+## 2026-07-21 - GrayLine feedback sign and encoder-spike correction
+
+- Initial JustFloat correlation was not sufficient to override physical steering direction. GrayLine retains IMU Z-axis sign `+1`; physical on-target behavior is the source of truth.
+- GrayLine wheel-speed PID now rejects a frame if either encoder-derived speed exceeds `0.80 m/s`, while advancing its encoder reference so the same corrupt counts are not reused.
+
+## 2026-07-24 - Runtime log management
+
+- Replaced legacy text log macros with runtime level/module filtering: ERROR, WARN, INFO, and DEBUG across SYS, CLI, INS, MOTION, NAV, PATH, TEST1, GRAY, GRAYLINE, MOTOR, ENCODER, IMU, MAG, FLASH, TFT, BUTTON, and LED.
+- Added UART commands: `log help`, `log status`, `log level`, `log module`, and `log telemetry`.
+- JustFloat is disabled by default and explicitly selects either `motion` or `grayline`; selected telemetry suppresses text output to keep the UART protocol exclusive.
+- Keil rebuild currently stops in the existing SysConfig pre-build command because `C:\.metadata\product.json` is missing; source compilation therefore still needs a machine with the SysConfig profile restored.
+
+## 2026-07-25 - UART DMA text logger
+
+- [x] Updated `empty.syscfg` and regenerated UART0 TX-DMA configuration: full DMA CH2, byte transfers, TX trigger, DMA_DONE_TX/EOT_DONE interrupt sources, and TX FIFO enabled.
+- [x] Replaced blocking text logger with one 160-byte static whole-record DMA slot; busy text logs are dropped and counted by `LOG_GetDroppedCount()`.
+- [x] Kept JustFloat exclusive and protected it from concurrent text-DMA or another telemetry frame.
+- [x] Reduced `PATH_MAX_POINTS` from 500 to 292, giving over 2 KiB net RAM back after logger storage.
+- [x] Enabled FreeRTOS stack-overflow level 2 and added a direct-UART overflow report/reset hook.
+- [x] Keil clean rebuild completed: 0 errors, 0 warnings.
+- [ ] On target: verify no boot HardFault, record integrity under concurrent task logs, dropped count under heavy logging, and stack-watermark margins.
+
+## 2026-07-25 - Dual-path UART logger
+
+- [x] Added serialized reliable DMA transport for initialization, ERROR, CLI replies, and stack reports; normal logs remain non-blocking DMA.
+- [x] Enabled UART0 NVIC during hardware/log initialization so reliable init records can receive EOT before `ins_cmd` begins.
+- [x] ERROR now stops selected JustFloat telemetry before reporting; telemetry must be selected again afterward.
+- [x] Keil clean rebuild: 0 errors, 0 warnings; ZI=30056 bytes (+168 bytes).
+- [ ] On target: cold boot full log, complete 100-second stack report, command help/status output, telemetry/error priority, and `min_ever >= 2048` bytes.
+
+## 2026-07-25 - Compact boot log and Gray stack
+
+- [x] Removed successful task-created/task-ready records; retained one worker summary and all create failures.
+- [x] Reduced ICM/LIS boot output to final identity records; scans/probes DEBUG, failures ERROR.
+- [x] Reduced Flash output to JEDEC/capacity and `Flash selftest PASS`; added explicit readback ERROR.
+- [x] Reduced IMU calibration to keep-still, gyro bias, one MAG2D result, and WARN only when invalid.
+- [x] Set Gray stack and monitor default to 154 words (+104 bytes).
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=101576, RO=16628, RW=440, ZI=30056).
+- [ ] On target: cold boot and 100-second stack report; require Gray total=154 words and `min_ever >= 2048` bytes.

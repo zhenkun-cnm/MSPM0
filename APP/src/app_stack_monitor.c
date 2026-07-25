@@ -29,7 +29,7 @@ static StackMonEntry s_tasks[APP_STACK_MON_COUNT] = {
     [APP_STACK_MON_MOTION]    = { "motion",       NULL, 192 },
     [APP_STACK_MON_NAV]       = { "nav",          NULL, 160 },
     [APP_STACK_MON_PATH]      = { "path",         NULL, 384 },
-    [APP_STACK_MON_GRAY]      = { "gray",         NULL, 128 },
+    [APP_STACK_MON_GRAY]      = { "gray",         NULL, 154 },
     [APP_STACK_MON_GRAYLINE]  = { "grayline",     NULL, 192 },
     [APP_STACK_MON_FLASH]     = { "flash_test",   NULL, 192 },
     [APP_STACK_MON_MONITOR]   = { "stack_mon",    NULL, MONITOR_STACK_DEPTH },
@@ -72,7 +72,7 @@ static void print_task_stack(const StackMonEntry *entry)
     used = (remaining < total) ? (total - remaining) : 0U;
     peakPct = (used * 100U) / total;
 
-    LOG_RAW("[STACK] %-12s peak=%3lu%% used=%lu/%lu words free=%lu words\r\n",
+    LOGI_RELIABLE(LOG_MOD_SYS, "%-12s peak=%3lu%% used=%lu/%lu words free=%lu words\r\n",
             entry->name,
             (unsigned long)peakPct,
             (unsigned long)used,
@@ -89,13 +89,13 @@ static void stack_monitor_task(void *pvParameters)
     while (1) {
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(MONITOR_PERIOD_MS));
 
-        LOG_RAW("[STACK] ----- Task Stack Usage (peak) -----\r\n");
+        LOGI_RELIABLE(LOG_MOD_SYS, "----- Task Stack Usage (peak) -----\r\n");
 
         for (uint32_t i = 0; i < APP_STACK_MON_COUNT; i++) {
             print_task_stack(&s_tasks[i]);
         }
 
-        LOG_RAW("[HEAP] free=%lu bytes min_ever=%lu bytes\r\n",
+        LOGI_RELIABLE(LOG_MOD_SYS, "free=%lu bytes min_ever=%lu bytes\r\n",
                 (unsigned long)xPortGetFreeHeapSize(),
                 (unsigned long)xPortGetMinimumEverFreeHeapSize());
 
@@ -133,12 +133,10 @@ void app_stack_monitor_start(void)
                                     1,
                                     &handle);
     if (status != pdPASS) {
-        LOG_ERROR("[STACK] monitor task create failed\r\n");
+        LOGE(LOG_MOD_SYS, "monitor task create failed\r\n");
     } else {
         app_stack_monitor_set_task(APP_STACK_MON_MONITOR,
                                    handle,
                                    MONITOR_STACK_DEPTH);
-        LOG_INFO("[STACK] monitor started, period=%lums\r\n",
-                 (unsigned long)MONITOR_PERIOD_MS);
     }
 }

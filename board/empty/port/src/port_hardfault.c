@@ -9,6 +9,8 @@
 #include <ti/devices/msp/msp.h>
 #include "ti_msp_dl_config.h"     /* sys_uart_INST = UART0 */
 #include <ti/driverlib/driverlib.h>
+#include "FreeRTOS.h"
+#include "task.h"
 
 /* ================================================================
  *  裸机 UART 发送 — 用 DriverLib 阻塞发送，复用 SysConfig UART0
@@ -105,5 +107,18 @@ void HardFault_C(uint32_t *sp)
     for (volatile uint32_t d = 0; d < 8000000; d++) { __NOP(); }
     NVIC_SystemReset();
 
+    while (1) { __NOP(); }
+}
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    (void)xTask;
+    __disable_irq();
+    uart_puts("\r\n=== STACK OVERFLOW ===\r\n");
+    uart_puts("task=");
+    uart_puts((pcTaskName != NULL) ? pcTaskName : "unknown");
+    uart_puts("\r\nSystem halted. Rebooting in 3s...\r\n");
+    for (volatile uint32_t d = 0; d < 8000000U; d++) { __NOP(); }
+    NVIC_SystemReset();
     while (1) { __NOP(); }
 }

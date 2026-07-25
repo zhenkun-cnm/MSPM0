@@ -586,8 +586,16 @@ SYSCONFIG_WEAK void SYSCFG_DL_sys_uart_init(void)
 
     /* Configure Interrupts */
     DL_UART_Main_enableInterrupt(sys_uart_INST,
+                                 DL_UART_MAIN_INTERRUPT_DMA_DONE_TX |
+                                 DL_UART_MAIN_INTERRUPT_EOT_DONE |
                                  DL_UART_MAIN_INTERRUPT_RX);
 
+    /* Configure DMA Transmit Event */
+    DL_UART_Main_enableDMATransmitEvent(sys_uart_INST);
+    /* Configure FIFOs */
+    DL_UART_Main_enableFIFOs(sys_uart_INST);
+    DL_UART_Main_setRXFIFOThreshold(sys_uart_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+    DL_UART_Main_setTXFIFOThreshold(sys_uart_INST, DL_UART_TX_FIFO_LEVEL_ONE_ENTRY);
 
     DL_UART_Main_enable(sys_uart_INST);
 }
@@ -647,7 +655,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_W25Q64_init(void) {
      *     outputBitRate = (spiInputClock) / ((1 + SCR) * 2)
      *     8000000 = (80000000)/((1 + 4) * 2)
      */
-    DL_SPI_setBitRateSerialClockDivider(W25Q64_INST, 4);
+    DL_SPI_setBitRateSerialClockDivider(W25Q64_INST, 1);
     /* Set RX and TX FIFO threshold levels */
     DL_SPI_setFIFOThreshold(W25Q64_INST, DL_SPI_RX_FIFO_LEVEL_1_2_FULL, DL_SPI_TX_FIFO_LEVEL_1_2_EMPTY);
 
@@ -687,11 +695,27 @@ SYSCONFIG_WEAK void SYSCFG_DL_DMA_CH1_init(void)
     DL_DMA_setTransferSize(DMA, DMA_CH1_CHAN_ID, 256);
     DL_DMA_initChannel(DMA, DMA_CH1_CHAN_ID , (DL_DMA_Config *) &gDMA_CH1Config);
 }
+static const DL_DMA_Config gDMA_CH2Config = {
+    .transferMode   = DL_DMA_SINGLE_TRANSFER_MODE,
+    .extendedMode   = DL_DMA_NORMAL_MODE,
+    .destIncrement  = DL_DMA_ADDR_UNCHANGED,
+    .srcIncrement   = DL_DMA_ADDR_INCREMENT,
+    .destWidth      = DL_DMA_WIDTH_BYTE,
+    .srcWidth       = DL_DMA_WIDTH_BYTE,
+    .trigger        = sys_uart_INST_DMA_TRIGGER,
+    .triggerType    = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_DMA_CH2_init(void)
+{
+    DL_DMA_initChannel(DMA, DMA_CH2_CHAN_ID , (DL_DMA_Config *) &gDMA_CH2Config);
+}
 SYSCONFIG_WEAK void SYSCFG_DL_DMA_init(void){
     DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_0, 1);
     DL_DMA_setSubscriberChanID(DMA, DL_DMA_SUBSCRIBER_INDEX_1, 2);
     SYSCFG_DL_DMA_CH0_init();
     SYSCFG_DL_DMA_CH1_init();
+    SYSCFG_DL_DMA_CH2_init();
 }
 
 

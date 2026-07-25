@@ -15,7 +15,9 @@
 #include "app_tb6612.h"
 #include "app_motion.h"
 #include "app_gray_line.h"
+#include "app_imu.h"
 #include "app_ins.h"
+#include "app_path.h"
 #include "dev_tft.h"
 #include "dev_menu.h"
 #include "dev_encoder.h"
@@ -28,12 +30,6 @@
 /* ================================================================
  *  Menu content tables (static tree, add menus here only)
  * ================================================================ */
-
-/* Runtime mutable values (non-const, editable in edit mode) */
-static int16_t g_brightness = 50;
-static int16_t g_contrast   = 50;
-static float   g_temp       = 23.5f;
-static float   g_testAuto   = 0.0f;
 
 /* TB6612 motor control runtime variables */
 static int16_t g_motorOn       = 0;
@@ -52,31 +48,33 @@ static void motorCmdSend(MotorCmdType type, int16_t val)
     xQueueSend(g_motorCmdQueue, &cmd, 0);
 }
 
-static void insCmdSend(INS_CommandType_t type)
+static bool insCmdSend(INS_CommandType_t type)
 {
     INS_Command_t cmd;
 
-    if (g_insCmdQueue == NULL) return;
+    if (g_insCmdQueue == NULL) return false;
     cmd.type = type;
-    (void)xQueueSend(g_insCmdQueue, &cmd, 0);
+    return xQueueSend(g_insCmdQueue, &cmd, 0) == pdTRUE;
 }
 
-static const MenuItem settingsItems[] = {
-    {"Brightness", MENU_VALUE,   NULL, 0, MENU_VAL_INT,   {.i = &g_brightness}, {.i = 0}, {.i = 100}, {.i = 5}},
-    {"Contrast",   MENU_VALUE,   NULL, 0, MENU_VAL_INT,   {.i = &g_contrast},   {.i = 0}, {.i = 100}, {.i = 5}},
-    {"Temp",       MENU_VALUE,   NULL, 0, MENU_VAL_FLOAT, {.f = &g_temp},       {.f = 0.0f}, {.f = 50.0f}, {.f = 0.5f}},
-    {"Back-Test",  MENU_LEAF,    NULL, 0, MENU_VAL_INT,   {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-};
+static bool pathCmdSend(Path_CommandType_t type)
+{
+    Path_Command_t cmd;
 
-static const MenuItem sensorItems[] = {
-    {"IMU Data",   MENU_LEAF,    NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Encoder",    MENU_LEAF,    NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-};
+    if (g_pathCmdQueue == NULL) return false;
+    cmd.type = type;
+    return xQueueSend(g_pathCmdQueue, &cmd, 0) == pdTRUE;
+}
 
-static const MenuItem aboutItems[] = {
-    {"Version",    MENU_LEAF,    NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Author",     MENU_LEAF,    NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-};
+static bool graylineCmdSend(GrayLine_CommandType_t type, bool rateLoopEnabled)
+{
+    GrayLine_Command_t cmd;
+
+    if (g_grayLineCmdQueue == NULL) return false;
+    cmd.type = type;
+    cmd.rate_loop_enabled = rateLoopEnabled;
+    return xQueueSend(g_grayLineCmdQueue, &cmd, 0) == pdTRUE;
+}
 
 /* TB6612 direction LEAF items: enter = send command, auto-return */
 static const MenuItem dirLeafItems[] = {
@@ -140,6 +138,11 @@ static const MenuItem grayLinePidItems[] = {
     {"LostMs",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.lost_timeout_ms}, {.f = 50.0f}, {.f = 1000.0f}, {.f = 50.0f}},
     {"Slew",    MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.pwm_slew},        {.f = 0.5f},  {.f = 10.0f},  {.f = 0.5f}},
     {"RevMax",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.reverse_mps_max}, {.f = 0.0f},  {.f = 0.150f}, {.f = 0.005f}},
+    {"RateKp",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.rate_kp},         {.f = 0.0f},  {.f = 0.0200f}, {.f = 0.0001f}},
+    {"RateKi",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.rate_ki},         {.f = 0.0f},  {.f = 0.0200f}, {.f = 0.0001f}},
+    {"RateKd",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.rate_kd},         {.f = 0.0f},  {.f = 0.0200f}, {.f = 0.0001f}},
+    {"RateMax", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.rate_dps_max},    {.f = 10.0f}, {.f = 250.0f},  {.f = 5.0f}},
+    {"RateTrim",MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_grayLinePid.rate_trim_mps_max},{.f = 0.0f},  {.f = 0.150f}, {.f = 0.005f}},
 };
 #define GRAYLINE_PID_ITEM_COUNT  (sizeof(grayLinePidItems) / sizeof(grayLinePidItems[0]))
 
@@ -155,35 +158,49 @@ static const MenuItem pidItems[] = {
 #define PID_YAW_STATUS_INDEX 5U
 
 static const MenuItem testItems[] = {
-    {"LED Test",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"Encoder",     MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"Button",      MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"Motor",       MENU_SUBMENU, motorItems,  MOTOR_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Display",     MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"IMU View",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"Yaw View",    MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"Odom View",   MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"Flash View",  MENU_LEAF,    NULL,        0, MENU_VAL_INT,   {.i = NULL},        {.i = 0},    {.i = 0},     {.i = 0}},
-    {"AutoTest",    MENU_VALUE,   NULL,        0, MENU_VAL_FLOAT, {.f = &g_testAuto}, {.f = 0.0f}, {.f = 999.9f}, {.f = 0.1f}},
+    {"Motor_Test", MENU_SUBMENU, motorItems, MOTOR_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
-#define TEST_AUTO_INDEX  9U
 #define TEST_ITEM_COUNT  (sizeof(testItems) / sizeof(testItems[0]))
 
 static const MenuItem insViewItems[] = {
-    {"View",       MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"M2 RevFix",  MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"View",      MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Reset",     MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Rec Start", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Rec Stop",  MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Path Save", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Path Load", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Path Replay", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Path Stop", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"M2 RevFix", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 #define INS_VIEW_ITEM_COUNT       (sizeof(insViewItems) / sizeof(insViewItems[0]))
 #define INS_VIEW_PAGE_INDEX       0U
-#define INS_VIEW_M2_REVFIX_INDEX  1U
+#define INS_RESET_INDEX           1U
+#define INS_REC_START_INDEX       2U
+#define INS_REC_STOP_INDEX        3U
+#define INS_PATH_SAVE_INDEX       4U
+#define INS_PATH_LOAD_INDEX       5U
+#define INS_PATH_REPLAY_INDEX     6U
+#define INS_PATH_STOP_INDEX       7U
+#define INS_VIEW_M2_REVFIX_INDEX  8U
+
+static const MenuItem grayLineItems[] = {
+    {"Start",     MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Stop",      MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Rate Loop", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Status",    MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+};
+#define GRAYLINE_ITEM_COUNT       (sizeof(grayLineItems) / sizeof(grayLineItems[0]))
+#define GRAYLINE_START_INDEX      0U
+#define GRAYLINE_STOP_INDEX       1U
+#define GRAYLINE_RATE_LOOP_INDEX  2U
+#define GRAYLINE_STATUS_INDEX     3U
 
 static const MenuItem rootItems[] = {
     {"Test",       MENU_SUBMENU, testItems,    (uint8_t)TEST_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"PID",        MENU_SUBMENU, pidItems,     (uint8_t)PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Settings",   MENU_SUBMENU, settingsItems, 4, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"Sensors",    MENU_SUBMENU, sensorItems,   2, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"INS View",   MENU_SUBMENU, insViewItems,  (uint8_t)INS_VIEW_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
-    {"About",      MENU_SUBMENU, aboutItems,    3, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"INS",        MENU_SUBMENU, insViewItems,  (uint8_t)INS_VIEW_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"GrayLine",   MENU_SUBMENU, grayLineItems, (uint8_t)GRAYLINE_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 
 #define ROOT_ITEM_COUNT     (sizeof(rootItems) / sizeof(rootItems[0]))
@@ -206,6 +223,86 @@ static const char *g_lastKeyMsg = "Key:--";
 static bool g_insViewFirstRender = true;
 static bool g_yawStatusFirstRender = true;
 static bool g_arcStatusFirstRender = true;
+static bool g_grayLineStatusFirstRender = true;
+
+typedef enum {
+    MENU_FEEDBACK_NONE = 0,
+    MENU_FEEDBACK_INS,
+    MENU_FEEDBACK_PATH
+} MenuFeedbackSource_t;
+
+typedef struct {
+    MenuFeedbackSource_t source;
+    uint32_t             sequence;
+    uint8_t              command;
+} MenuFeedback_t;
+
+static MenuFeedback_t g_menuFeedback = {MENU_FEEDBACK_NONE, 0U, 0U};
+
+static const char *path_cmd_name(Path_CommandType_t command)
+{
+    switch (command) {
+        case PATH_CMD_RECORD_START: return "REC START";
+        case PATH_CMD_RECORD_STOP:  return "REC STOP";
+        case PATH_CMD_SAVE:         return "SAVE";
+        case PATH_CMD_LOAD:         return "LOAD";
+        case PATH_CMD_REPLAY:       return "REPLAY";
+        case PATH_CMD_STOP:         return "STOP";
+        default:                    return "PATH";
+    }
+}
+
+static const char *path_error_name(Path_Error_t error)
+{
+    switch (error) {
+        case PATH_ERROR_INS_NOT_READY: return "INS";
+        case PATH_ERROR_ACTIVE:        return "ACTIVE";
+        case PATH_ERROR_TOO_SHORT:     return "POINTS";
+        case PATH_ERROR_FLASH:         return "FLASH";
+        case PATH_ERROR_CHECKSUM:      return "CRC";
+        case PATH_ERROR_MOTION_BUSY:   return "MOTION";
+        case PATH_ERROR_MOTION:        return "MOTION";
+        default:                       return "FAIL";
+    }
+}
+
+static void menu_watch_ins(INS_CommandType_t command)
+{
+    INS_ControlStatus_t status;
+
+    g_menuFeedback.source = MENU_FEEDBACK_INS;
+    g_menuFeedback.command = (uint8_t)command;
+    g_menuFeedback.sequence = INS_ControlStatus_Read(&status) ? status.sequence : 0U;
+    g_lastKeyMsg = "INS QUEUED";
+}
+
+static void menu_watch_path(Path_CommandType_t command)
+{
+    Path_RuntimeStatus_t status;
+
+    g_menuFeedback.source = MENU_FEEDBACK_PATH;
+    g_menuFeedback.command = (uint8_t)command;
+    g_menuFeedback.sequence = Path_Status_Read(&status) ? status.sequence : 0U;
+    g_lastKeyMsg = "PATH QUEUED";
+}
+
+static void menu_queue_ins(INS_CommandType_t command)
+{
+    menu_watch_ins(command);
+    if (!insCmdSend(command)) {
+        g_menuFeedback.source = MENU_FEEDBACK_NONE;
+        g_lastKeyMsg = "INS QUEUE ERR";
+    }
+}
+
+static void menu_queue_path(Path_CommandType_t command)
+{
+    menu_watch_path(command);
+    if (!pathCmdSend(command)) {
+        g_menuFeedback.source = MENU_FEEDBACK_NONE;
+        g_lastKeyMsg = "PATH QUEUE ERR";
+    }
+}
 
 /* ================================================================
  *  Helper: decimals from float step
@@ -216,7 +313,8 @@ static uint8_t decimals_from_step(float step)
     if (step >= 1.0f)  return 0;
     if (step >= 0.1f)  return 1;
     if (step >= 0.01f) return 2;
-    return 3;
+    if (step >= 0.001f) return 3;
+    return 4;
 }
 
 /* ================================================================
@@ -311,6 +409,43 @@ static void menu_render_item_line(DevTFT *tft, const MenuCtx *ctx, uint8_t logic
 static void menu_render_status(DevTFT *tft)
 {
     tft->fillRect(tft, 0, KEY_STATUS_Y, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+
+    if (g_menuFeedback.source == MENU_FEEDBACK_INS) {
+        INS_ControlStatus_t status;
+        if (INS_ControlStatus_Read(&status) &&
+            status.sequence > g_menuFeedback.sequence &&
+            status.last_command == (INS_CommandType_t)g_menuFeedback.command) {
+            tft->printString(tft, 0, KEY_STATUS_Y,
+                (status.result == INS_CONTROL_RESULT_OK) ? "INS OK" : "INS ERR",
+                (status.result == INS_CONTROL_RESULT_OK) ? TFT_GREEN : TFT_RED,
+                TFT_BLACK);
+            return;
+        }
+    } else if (g_menuFeedback.source == MENU_FEEDBACK_PATH) {
+        Path_RuntimeStatus_t status;
+        if (Path_Status_Read(&status) &&
+            status.sequence > g_menuFeedback.sequence &&
+            status.last_command == (Path_CommandType_t)g_menuFeedback.command) {
+            if (status.result == PATH_RESULT_ERROR) {
+                tft->printf(tft, 0, KEY_STATUS_Y, TFT_RED, TFT_BLACK, "%s ERR %s",
+                            path_cmd_name(status.last_command),
+                            path_error_name(status.error));
+            } else if (status.result == PATH_RESULT_RUNNING) {
+                tft->printf(tft, 0, KEY_STATUS_Y, TFT_YELLOW, TFT_BLACK,
+                            "REPLAY %u/%u", (unsigned)status.replay_index,
+                            (unsigned)status.replay_total);
+            } else if (status.result == PATH_RESULT_DONE) {
+                tft->printString(tft, 0, KEY_STATUS_Y, "REPLAY DONE",
+                                 TFT_GREEN, TFT_BLACK);
+            } else {
+                tft->printf(tft, 0, KEY_STATUS_Y, TFT_GREEN, TFT_BLACK, "%s OK %u",
+                            path_cmd_name(status.last_command),
+                            (unsigned)status.point_count);
+            }
+            return;
+        }
+    }
+
     tft->printString(tft, 0, KEY_STATUS_Y, g_lastKeyMsg, TFT_GREEN, TFT_BLACK);
 }
 
@@ -340,6 +475,47 @@ static void leaf_render(DevTFT *tft, const MenuItem *it)
     tft->printString(tft, 0, 0, it->title, TFT_YELLOW, TFT_BLACK);
     tft->printString(tft, 0, MENU_ROW_H, "(leaf page)", TFT_WHITE, TFT_BLACK);
     tft->printString(tft, 0, 2 * MENU_ROW_H, "Long=Back", TFT_GRAY, TFT_BLACK);
+}
+
+static void grayline_status_render(DevTFT *tft)
+{
+    static int8_t previous = -1;
+    GrayLine_Status_t status;
+    int8_t display;
+
+    if (g_grayLineStatusFirstRender) {
+        g_grayLineStatusFirstRender = false;
+        previous = -1;
+        tft->fillScreen(tft, TFT_BLACK);
+        tft->printString(tft, 0, 0, "-- GrayLine --", TFT_YELLOW, TFT_BLACK);
+        tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
+    }
+
+    if (!GrayLine_ReadStatus(&status)) {
+        return;
+    }
+
+    if (!status.rate_loop_enabled) {
+        display = 0;
+    } else if (status.running && !status.rate_loop_active) {
+        display = 1;
+    } else {
+        display = 2;
+    }
+
+    if (display == previous) {
+        return;
+    }
+
+    tft->fillRect(tft, 0, 3 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+    if (display == 0) {
+        tft->printString(tft, 0, 3 * MENU_ROW_H, "Rate Loop: OFF", TFT_GRAY, TFT_BLACK);
+    } else if (display == 1) {
+        tft->printString(tft, 0, 3 * MENU_ROW_H, "Rate Loop: WAIT IMU", TFT_YELLOW, TFT_BLACK);
+    } else {
+        tft->printString(tft, 0, 3 * MENU_ROW_H, "Rate Loop: ON", TFT_GREEN, TFT_BLACK);
+    }
+    previous = display;
 }
 
 /* ================================================================
@@ -401,26 +577,45 @@ static bool handle_quick_leaf(const MenuItem *cur, MenuCtx *ctx)
         g_scrollOfs = 0;
         return true;
     }
-    if (cur == &insViewItems[INS_VIEW_M2_REVFIX_INDEX]) {
-        insCmdSend(INS_CMD_FLIP);
-        g_lastKeyMsg = "M2 RevFixed";
+    if (cur == &insViewItems[INS_RESET_INDEX]) {
+        menu_queue_ins(INS_CMD_RESET);
+    } else if (cur == &insViewItems[INS_REC_START_INDEX]) {
+        menu_queue_path(PATH_CMD_RECORD_START);
+    } else if (cur == &insViewItems[INS_REC_STOP_INDEX]) {
+        menu_queue_path(PATH_CMD_RECORD_STOP);
+    } else if (cur == &insViewItems[INS_PATH_SAVE_INDEX]) {
+        menu_queue_path(PATH_CMD_SAVE);
+    } else if (cur == &insViewItems[INS_PATH_LOAD_INDEX]) {
+        menu_queue_path(PATH_CMD_LOAD);
+    } else if (cur == &insViewItems[INS_PATH_REPLAY_INDEX]) {
+        menu_queue_path(PATH_CMD_REPLAY);
+    } else if (cur == &insViewItems[INS_PATH_STOP_INDEX]) {
+        menu_queue_path(PATH_CMD_STOP);
+    } else if (cur == &insViewItems[INS_VIEW_M2_REVFIX_INDEX]) {
+        menu_queue_ins(INS_CMD_FLIP);
+    } else if (cur == &grayLineItems[GRAYLINE_START_INDEX]) {
+        g_lastKeyMsg = graylineCmdSend(GRAYLINE_CMD_START, false) ?
+                       "GRAY START" : "GRAY QUEUE ERR";
+    } else if (cur == &grayLineItems[GRAYLINE_STOP_INDEX]) {
+        g_lastKeyMsg = graylineCmdSend(GRAYLINE_CMD_STOP, false) ?
+                       "GRAY STOP" : "GRAY QUEUE ERR";
+    } else if (cur == &grayLineItems[GRAYLINE_RATE_LOOP_INDEX]) {
+        GrayLine_Status_t status;
+        bool enable = false;
+
+        if (GrayLine_ReadStatus(&status)) {
+            enable = !status.rate_loop_enabled;
+        }
+        g_lastKeyMsg = graylineCmdSend(GRAYLINE_CMD_SET_RATE_LOOP, enable) ?
+                       (enable ? "RATE LOOP ON" : "RATE LOOP OFF") :
+                       "GRAY QUEUE ERR";
+    } else {
+        return false;
+    }
+
         Menu_Back(ctx);
         g_scrollOfs = 0;
         return true;
-    }
-    return false;
-}
-
-static void auto_test_tick(DevTFT *tft, const MenuCtx *ctx, bool inLeaf)
-{
-    g_testAuto += 0.1f;
-    if (g_testAuto > 999.9f) {
-        g_testAuto = 0.0f;
-    }
-
-    if (!inLeaf && ctx->current == testItems) {
-        menu_render_item_line(tft, ctx, TEST_AUTO_INDEX);
-    }
 }
 
 /* ================================================================
@@ -429,10 +624,18 @@ static void auto_test_tick(DevTFT *tft, const MenuCtx *ctx, bool inLeaf)
 static void ins_view_render(DevTFT *tft)
 {
     static float prevX = -999.0f, prevY = -999.0f, prevM1 = -999.0f, prevM2 = -999.0f, prevYaw = -999.0f;
+    static uint32_t prevPathSequence = 0xFFFFFFFFU;
+    static uint16_t prevPathPoints = 0xFFFFU;
+    static uint16_t prevReplayIndex = 0xFFFFU;
+    static Path_State_t prevPathState = (Path_State_t)(-1);
 
     if (g_insViewFirstRender) {
         g_insViewFirstRender = false;
         prevX = prevY = prevM1 = prevM2 = prevYaw = -999.0f;
+        prevPathSequence = 0xFFFFFFFFU;
+        prevPathPoints = 0xFFFFU;
+        prevReplayIndex = 0xFFFFU;
+        prevPathState = (Path_State_t)(-1);
         tft->fillScreen(tft, TFT_BLACK);
         tft->printString(tft, 0, 0, "--- INS ---", TFT_YELLOW, TFT_BLACK);
         tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
@@ -469,6 +672,38 @@ static void ins_view_render(DevTFT *tft)
         tft->fillRect(tft, 0, 5 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
         tft->printf(tft, 0, 5 * MENU_ROW_H, TFT_WHITE, TFT_BLACK, "YAW: %+.2f deg", (double)pose.yaw_deg);
         prevYaw = pose.yaw_deg;
+    }
+
+    {
+        Path_RuntimeStatus_t path;
+        if (Path_Status_Read(&path) &&
+            (path.sequence != prevPathSequence ||
+             path.point_count != prevPathPoints ||
+             path.replay_index != prevReplayIndex ||
+             path.state != prevPathState)) {
+            tft->fillRect(tft, 0, 6 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
+            if (path.result == PATH_RESULT_ERROR) {
+                tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_RED, TFT_BLACK,
+                            "P ERR:%s", path_error_name(path.error));
+            } else if (path.result == PATH_RESULT_RUNNING ||
+                       path.state == PATH_STATE_REPLAY_TRACK) {
+                tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_YELLOW, TFT_BLACK,
+                            "P RUN:%u/%u", (unsigned)path.replay_index,
+                            (unsigned)path.replay_total);
+            } else if (path.result == PATH_RESULT_DONE) {
+                tft->printString(tft, 0, 6 * MENU_ROW_H, "P DONE", TFT_GREEN, TFT_BLACK);
+            } else if (path.state == PATH_STATE_RECORDING) {
+                tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_YELLOW, TFT_BLACK,
+                            "P REC:%u", (unsigned)path.point_count);
+            } else {
+                tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_GREEN, TFT_BLACK,
+                            "P OK:%u", (unsigned)path.point_count);
+            }
+            prevPathSequence = path.sequence;
+            prevPathPoints = path.point_count;
+            prevReplayIndex = path.replay_index;
+            prevPathState = path.state;
+        }
     }
 }
 
@@ -585,19 +820,54 @@ static void arc_status_render(DevTFT *tft)
 /* ================================================================
  *  TFT menu task
  * ================================================================ */
+static bool tft_wait_for_system_ready(DevTFT *tft)
+{
+    tft->fillScreen(tft, TFT_BLACK);
+    tft->printString(tft, 0, 2 * MENU_ROW_H, "System", TFT_YELLOW, TFT_BLACK);
+    tft->printString(tft, 0, 3 * MENU_ROW_H, "Initializing...", TFT_YELLOW, TFT_BLACK);
+    tft->printString(tft, 0, 5 * MENU_ROW_H, "IMU calibration", TFT_GRAY, TFT_BLACK);
+
+    while (1) {
+        IMU_InitStatus_t status = IMU_InitStatus_Get();
+
+        if (status == IMU_INIT_READY) {
+            tft->fillScreen(tft, TFT_BLACK);
+            tft->printString(tft, 0, 2 * MENU_ROW_H, "System Ready", TFT_GREEN, TFT_BLACK);
+            tft->printString(tft, 0, 3 * MENU_ROW_H, "Initialization", TFT_GREEN, TFT_BLACK);
+            tft->printString(tft, 0, 4 * MENU_ROW_H, "Complete", TFT_GREEN, TFT_BLACK);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            return true;
+        }
+
+        if (status == IMU_INIT_FAILED) {
+            tft->fillScreen(tft, TFT_BLACK);
+            tft->printString(tft, 0, 2 * MENU_ROW_H, "System Init Error", TFT_RED, TFT_BLACK);
+            tft->printString(tft, 0, 3 * MENU_ROW_H, "IMU failed", TFT_RED, TFT_BLACK);
+            return false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
 void tft_task(void *pvParameters)
 {
     (void)pvParameters;
 
     DevTFT *tft = GetTFT();
     if (tft == NULL) {
-        LOG_ERROR("[TFT] Device handle is NULL!\r\n");
+        LOGE(LOG_MOD_TFT, "Device handle is NULL!\r\n");
         vTaskDelete(NULL);
         return;
     }
 
     tft->init(tft);
-    LOG_INFO("[TFT] ST7735 initialized OK\r\n");
+    LOGI_INIT(LOG_MOD_TFT, "ST7735 initialized OK\r\n");
+
+    if (!tft_wait_for_system_ready(tft)) {
+        vTaskDelete(NULL);
+        return;
+    }
 
     static MenuCtx menuCtx;
     Menu_Init(&menuCtx, rootItems, (uint8_t)ROOT_ITEM_COUNT);
@@ -607,19 +877,23 @@ void tft_task(void *pvParameters)
     bool insViewLeaf = false;
     bool yawStatusLeaf = false;
     bool arcStatusLeaf = false;
+    bool grayLineStatusLeaf = false;
     menu_render_full(tft, &menuCtx);
 
     DevEncoder_Event_t evt;
     while (1)
     {
         if (xQueueReceive(g_menuEvtQueue, &evt, pdMS_TO_TICKS(MENU_REFRESH_MS)) != pdTRUE) {
-            auto_test_tick(tft, &menuCtx, inLeaf);
             if (insViewLeaf) {
                 ins_view_render(tft);
             } else if (yawStatusLeaf) {
                 yaw_status_render(tft);
             } else if (arcStatusLeaf) {
                 arc_status_render(tft);
+            } else if (grayLineStatusLeaf) {
+                grayline_status_render(tft);
+            } else {
+                menu_render_status(tft);
             }
             continue;
         }
@@ -631,6 +905,7 @@ void tft_task(void *pvParameters)
                 insViewLeaf = false;
                 yawStatusLeaf = false;
                 arcStatusLeaf = false;
+                grayLineStatusLeaf = false;
                 Menu_Back(&menuCtx);
                 g_scrollOfs = 0;
                 menu_render_full(tft, &menuCtx);
@@ -696,6 +971,10 @@ void tft_task(void *pvParameters)
                             g_arcStatusFirstRender = true;
                             arcStatusLeaf = true;
                             arc_status_render(tft);
+                        } else if (cur == &grayLineItems[GRAYLINE_STATUS_INDEX]) {
+                            g_grayLineStatusFirstRender = true;
+                            grayLineStatusLeaf = true;
+                            grayline_status_render(tft);
                         } else {
                             leaf_render(tft, cur);
                         }

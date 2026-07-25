@@ -25,7 +25,7 @@ void flash_init_task(void *pvParameters)
     /* 获取 Flash 设备句柄 */
     DevFlash *flash = GetFlash();
     if (flash == NULL) {
-        LOG_ERROR("[FLASH] Device handle is NULL!\r\n");
+        LOGE(LOG_MOD_FLASH, "Device handle is NULL!\r\n");
         app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
@@ -37,10 +37,6 @@ void flash_init_task(void *pvParameters)
     /* ────── Step 1: 读取 JEDEC ID ────── */
     DevFlash_JEDECID_t id;
     if (flash->readJEDECID(flash, &id)) {
-        LOG_INFO("====================================\r\n");
-        LOG_INFO("  Flash JEDEC ID: %02X %02X %02X\r\n",
-                 id.manufacturer, id.memoryType, id.capacity);
-
         /* W25Q64: manufacturer = EF, memoryType = 40, capacity = 17 (64M-bit / 8MB) */
         if (id.manufacturer == 0xEF && id.memoryType == 0x40) {
             uint32_t sizeMB = 0;
@@ -51,67 +47,60 @@ void flash_init_task(void *pvParameters)
             } else if (id.capacity == 0x19) {
                 sizeMB = 32;    /* W25Q256: 256M-bit = 32MB */
             } else {
-                LOG_INFO("  Detected: Winbond SPI Flash (capacity=0x%02X)\r\n",
-                         id.capacity);
+                LOGI_INIT(LOG_MOD_FLASH,
+                          "Flash: JEDEC=%02X %02X %02X capacity=0x%02X\r\n",
+                          id.manufacturer, id.memoryType, id.capacity, id.capacity);
             }
             if (sizeMB > 0) {
-                LOG_INFO("  Detected: Winbond SPI Flash (%uMB)\r\n", sizeMB);
+                LOGI_INIT(LOG_MOD_FLASH,
+                          "Flash: JEDEC=%02X %02X %02X capacity=%uMB\r\n",
+                          id.manufacturer, id.memoryType, id.capacity, sizeMB);
             }
         } else {
-            LOG_INFO("  Warning: Unknown Flash (manuf=%02X)\r\n", id.manufacturer);
+            LOGW_RELIABLE(LOG_MOD_FLASH, "Flash: JEDEC=%02X %02X %02X unsupported\r\n",
+                          id.manufacturer, id.memoryType, id.capacity);
         }
     } else {
-        LOG_ERROR("[FLASH] Failed to read JEDEC ID!\r\n");
+        LOGE(LOG_MOD_FLASH, "Failed to read JEDEC ID!\r\n");
         app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
 
     /* ────── Step 2: 擦除第一�?────── */
-    LOG_INFO("  Erasing sector 0x%08lX ...\r\n", (unsigned long)TEST_ADDR);
     if (!flash->sectorErase(flash, TEST_ADDR)) {
-        LOG_ERROR("[FLASH] Sector erase FAILED at 0x%08lX!\r\n",
+        LOGE(LOG_MOD_FLASH, "Sector erase FAILED at 0x%08lX!\r\n",
                   (unsigned long)TEST_ADDR);
         app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
-    LOG_INFO("  Erase done\r\n");
-
     /* ────── Step 3: 写入 3 字节 ────── */
-    LOG_INFO("  Writing: %02X %02X %02X ...\r\n",
-             s_writeData[0], s_writeData[1], s_writeData[2]);
     if (!flash->pageProgram(flash, TEST_ADDR, s_writeData, 3)) {
-        LOG_ERROR("[FLASH] Page program FAILED!\r\n");
+        LOGE(LOG_MOD_FLASH, "Page program FAILED!\r\n");
         app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
         vTaskDelete(NULL);
         return;
     }
-    LOG_INFO("  Write done\r\n");
-
     /* ────── Step 4: 读出验证 ────── */
     uint8_t readBuf[8] = {0};
-    flash->read(flash, TEST_ADDR, readBuf, 8);
-
-    LOG_INFO("  Read back: ");
-    for (int i = 0; i < 8; i++) {
-        LOG_RAW("%02X ", readBuf[i]);
+    if (!flash->read(flash, TEST_ADDR, readBuf, 8)) {
+        LOGE(LOG_MOD_FLASH, "Readback failed!\r\n");
+        app_stack_monitor_clear_task(APP_STACK_MON_FLASH);
+        vTaskDelete(NULL);
+        return;
     }
-    LOG_RAW("\r\n");
-
     /* ────── Step 5: 结果判定 ────── */
     bool match = (readBuf[0] == s_writeData[0]) &&
                  (readBuf[1] == s_writeData[1]) &&
                  (readBuf[2] == s_writeData[2]);
 
     if (match) {
-        LOG_INFO("  Verification: PASS\r\n");
+        LOGI_INIT(LOG_MOD_FLASH, "Flash selftest PASS\r\n");
     } else {
-        LOG_INFO("  Verification: FAIL (expected %02X %02X %02X)\r\n",
+        LOGE(LOG_MOD_FLASH, "Verification: FAIL (expected %02X %02X %02X)\r\n",
                  s_writeData[0], s_writeData[1], s_writeData[2]);
     }
-
-    LOG_INFO("====================================\r\n");
 
     /* 验证完毕，删除自�?*/
     app_stack_monitor_clear_task(APP_STACK_MON_FLASH);

@@ -44,7 +44,7 @@
  *----------------------------------------------------------*/
 #define configUSE_IDLE_HOOK                     0       // 空闲钩子
 #define configUSE_TICK_HOOK                     0       // 时间片钩子
-#define configCHECK_FOR_STACK_OVERFLOW          0       // 堆栈溢出检查（调试时可设为1或2）
+#define configCHECK_FOR_STACK_OVERFLOW          2       // 堆栈溢出检查（调试时可设为1或2）
 #define configUSE_MALLOC_FAILED_HOOK            0       // 内存分配失败钩子
 
 /*-----------------------------------------------------------

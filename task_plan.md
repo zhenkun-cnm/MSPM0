@@ -465,3 +465,55 @@ Status: rolled back at user request after repeatable boot-time faults.
 - Restored the original direct blocking UART logger, 256-byte RX buffer, and default FreeRTOS stack/malloc hook settings.
 - Removed all TX-interrupt records, dynamic logger task/queue code, and `log_overwrite` status output.
 - Retained reverse/signed speedtest diagnostics and the `ins_cmd` 256-word stack with `stack_min_free` status reporting.
+
+## 2026-07-21 - GrayLine yaw-rate damping loop
+
+Status: implemented and Keil build-verified; on-target tuning pending.
+
+- Added a 10 ms IMU Z-axis yaw-rate feedback loop to GrayLine. The existing gray-position PID remains the steering feed-forward, while yaw-rate PID supplies a bounded damping trim.
+- Added target yaw-rate slew limiting and filtered gyro feedback for smoother straight-line and corner transitions.
+- Added TFT `PID -> GrayLine` entries: `RateKp`, `RateKi`, `RateKd`, `RateMax`, `RateTrim`, and `RateSlew`.
+- Extended GrayLine JustFloat from 10 to 17 floats; channels 0-9 are unchanged and channels 10-16 expose the yaw-rate loop.
+- IMU I2C reads now report success/failure; GrayLine automatically falls back to the pre-existing position-only controller if gyro data is invalid.
+- Keil build: `0 Error(s), 0 Warning(s)`.
+
+Next validation: capture 10-20 seconds of JustFloat for straight, continuous curve, and sharp curve tests, then tune `RateKp` and `RateTrim` first.
+
+## 2026-07-21 - GrayLine direct-turn correction
+
+- Removed `RateSlew`: it incorrectly replaced the gray-position steering feed-forward with a limited yaw-rate command and made sharp curves understeer.
+- GrayLine now sends the position-loop turn command directly to the wheels; the yaw-rate PID only adds a bounded damping trim. Existing PWM slew remains the physical output smoothing mechanism.
+
+## 2026-07-24 - Logging management completed
+
+- Use `log status` to inspect the active runtime level, module mask, and telemetry source.
+- Use `log level debug` for throttled diagnostic records and `log module <name> on|off` to isolate one module.
+- Use `log telemetry motion`, `log telemetry grayline`, or `log telemetry off`; telemetry is off after reset.
+
+## 2026-07-25 - Non-blocking DMA log transport and crash guard
+
+Status: implemented and clean-build verified; target verification pending.
+
+- UART0 text logs now use one static 160-byte DMA record on full DMA channel 2. A producer starts DMA only when the slot is idle; otherwise its complete record is dropped, so no FreeRTOS task waits for UART and records cannot interleave.
+- The DMA record is kept until UART EOT, not merely DMA-complete, so its source buffer cannot change while bytes remain in the UART hardware.
+- SysConfig owns the UART TX-DMA and completion-interrupt configuration. Motor encoder DMA channels remain unchanged.
+- `PATH_MAX_POINTS` changed from 500 to 292. The path array releases 2496 bytes; the logger adds 166 bytes of static storage, preserving 2330 bytes net free RAM.
+- Formatted log staging moved from task-stack arrays into the static DMA record. FreeRTOS stack-overflow checking is now level 2; its emergency hook reports the task name directly and resets.
+- The reported boot HardFault had LR in PendSV and PC=0 after restoring a task context, which is consistent with corrupted task-stack/scheduler context. The prior large per-call log buffers were a credible trigger; interleaved UART bytes were a separate serialization symptom.
+- Keil clean rebuild: 0 Error(s), 0 Warning(s).
+
+## 2026-07-25 - Reliable UART diagnostics
+
+- Added a second 160-byte static reliable record and a UART mutex; no log task, queue, TX FIFO ISR, or dynamic log buffer was introduced.
+- `LOGE`, `LOGI_INIT`, and `LOGI_RELIABLE` serialize a whole DMA record and wait for EOT. Normal `LOGI/LOGW/LOGD` remain non-blocking, single-record DMA and may drop.
+- Startup task creation uses direct blocking output inside its existing critical section. Task initialization, command replies, and stack-monitor reports use the reliable path.
+- EOT IRQ is enabled before scheduler tasks begin. ERROR disables active telemetry first, then emits its text; JustFloat must be explicitly re-enabled afterward.
+- Link map: ZI is 30056 bytes, a 168-byte increase for the reliable buffer/control state. `s_pathPoints` remains 3504 bytes (292 points).
+
+## 2026-07-25 - Compact boot log and Gray stack
+
+Status: implemented and clean-build verified; on-target validation pending.
+
+- Reduce cold-boot output to the worker-task summary, device final identities, calibration results, encoder DMA, TFT, INS yaw, CLI, and Flash self-test result.
+- Keep initialization and self-test failures as reliable ERROR records; I2C scan/probe details are DEBUG-only.
+- Increase `GRAY_TASK_STACK_WORDS` and the stack monitor baseline from 128 to 154 words (+104 bytes from the FreeRTOS heap).

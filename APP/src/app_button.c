@@ -37,7 +37,7 @@ void button_task(void *pvParameters)
         /* 读取并消费所有待处理事件：串口打印（非阻塞验证手段） */
         DevButton_Event_t e;
         while ((e = btn->getEvent(btn)).type != BUTTON_EVT_NONE) {
-            LOG_INFO("BTN%u: %s\r\n",
+            LOGI(LOG_MOD_BUTTON, "BTN%u: %s\r\n",
                      (unsigned)e.id, PORT_BUTTON_EvtToStr(e.type));
         }
 

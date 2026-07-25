@@ -151,12 +151,12 @@ static bool nav_send_motion_raw(Motion_CommandType_t type, float value, uint32_t
     cmd.cmd_id = cmd_id;
 
     if (g_motionCmdQueue == NULL) {
-        LOG_RAW("[NAV] error: motion queue not ready\r\n");
+        LOGE(LOG_MOD_NAV, "error: motion queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_motionCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[NAV] error: motion queue full\r\n");
+        LOGE(LOG_MOD_NAV, "error: motion queue full\r\n");
         return false;
     }
 
@@ -181,7 +181,7 @@ static bool nav_start_motion_step(Nav_Runtime_t *rt, Motion_CommandType_t type, 
     uint32_t cmd_id;
 
     if (!nav_motion_idle()) {
-        LOG_RAW("[NAV] error: motion busy\r\n");
+        LOGE(LOG_MOD_NAV, "error: motion busy\r\n");
         return false;
     }
 
@@ -214,7 +214,7 @@ static const char *nav_motion_type_name(Motion_CommandType_t type)
 
 static void nav_step_send_motion(const Nav_Runtime_t *rt, Motion_CommandType_t type, float value)
 {
-    log_printf_internal("[NAV_STEP] send motion cmd_id=0x%08lX type=%s value=%+.3f state=%s\r\n",
+    LOGD(LOG_MOD_NAV, "send motion cmd_id=0x%08lX type=%s value=%+.3f state=%s\r\n",
                         (unsigned long)rt->waiting_motion_cmd_id,
                         nav_motion_type_name(type),
                         value,
@@ -230,7 +230,7 @@ static int8_t nav_motion_step_result(Nav_Runtime_t *rt)
     }
 
     if (g_motionRtStatus.rejected_cmd_id == rt->waiting_motion_cmd_id) {
-        log_printf_internal("[NAV_STEP] motion rejected cmd_id=0x%08lX\r\n",
+        LOGD(LOG_MOD_NAV, "motion rejected cmd_id=0x%08lX\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id);
         return -1;
     }
@@ -243,7 +243,7 @@ static int8_t nav_motion_step_result(Nav_Runtime_t *rt)
         if (g_motionRtStatus.last_result == MOTION_RESULT_DONE) {
             return 1;
         }
-        log_printf_internal("[NAV_STEP] motion finished cmd_id=0x%08lX result=%s\r\n",
+        LOGD(LOG_MOD_NAV, "motion finished cmd_id=0x%08lX result=%s\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id,
                             nav_motion_result_name(g_motionRtStatus.last_result));
         return -1;
@@ -251,7 +251,7 @@ static int8_t nav_motion_step_result(Nav_Runtime_t *rt)
 
     elapsed_ms = (uint32_t)((xTaskGetTickCount() - rt->motion_cmd_tick) * portTICK_PERIOD_MS);
     if (!rt->motion_accepted && elapsed_ms >= NAV_MOTION_START_TIMEOUT_MS) {
-        log_printf_internal("[NAV_STEP] motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
+        LOGD(LOG_MOD_NAV, "motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id,
                             (int)g_motionRtStatus.state,
                             (unsigned long)g_motionRtStatus.active_cmd_id,
@@ -269,17 +269,17 @@ static void nav_enter_error(Nav_Runtime_t *rt, const char *reason)
     rt->state = NAV_STATE_ERROR;
     rt->square_active = false;
     nav_reset_motion_wait(rt);
-    LOG_RAW("[NAV] error: %s\r\n", reason);
+    LOGE(LOG_MOD_NAV, "error: %s\r\n", reason);
 }
 
 static void nav_print_help(void)
 {
-    LOG_RAW("[NAV_CMD] commands:\r\n");
-    LOG_RAW("  nav help\r\n");
-    LOG_RAW("  nav status\r\n");
-    LOG_RAW("  nav stop\r\n");
-    LOG_RAW("  nav goto <x_m> <y_m> <yaw_deg>\r\n");
-    LOG_RAW("  nav square <side_m>\r\n");
+    LOGI_RELIABLE(LOG_MOD_NAV, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_NAV, "  nav help\r\n");
+    LOGI_RELIABLE(LOG_MOD_NAV, "  nav status\r\n");
+    LOGI_RELIABLE(LOG_MOD_NAV, "  nav stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_NAV, "  nav goto <x_m> <y_m> <yaw_deg>\r\n");
+    LOGI_RELIABLE(LOG_MOD_NAV, "  nav square <side_m>\r\n");
 }
 
 static void nav_print_status(Nav_Runtime_t *rt)
@@ -289,7 +289,7 @@ static void nav_print_status(Nav_Runtime_t *rt)
 
     if (ok) {
         nav_update_errors(rt, &pose);
-        LOG_RAW("[NAV_CMD] state=%s target=(%+.3f,%+.3f,%+.1f) pose=(%+.3f,%+.3f,%+.1f) dist_err=%.3f yaw_err=%+.2f motion=%d wait=%lu active=%lu done=%lu rejected=%lu result=%s square=%u/%u\r\n",
+        LOGI_RELIABLE(LOG_MOD_NAV, "state=%s target=(%+.3f,%+.3f,%+.1f) pose=(%+.3f,%+.3f,%+.1f) dist_err=%.3f yaw_err=%+.2f motion=%d wait=%lu active=%lu done=%lu rejected=%lu result=%s square=%u/%u\r\n",
                 nav_state_name(rt->state),
                 rt->target_x_m,
                 rt->target_y_m,
@@ -308,7 +308,7 @@ static void nav_print_status(Nav_Runtime_t *rt)
                 rt->square_active ? (unsigned)(rt->square_leg + 1U) : 0U,
                 rt->square_active ? NAV_SQUARE_LEGS : 0U);
     } else {
-        LOG_RAW("[NAV_CMD] state=%s pose=not_ready motion=%d wait=%lu active=%lu done=%lu rejected=%lu result=%s\r\n",
+        LOGI_RELIABLE(LOG_MOD_NAV, "state=%s pose=not_ready motion=%d wait=%lu active=%lu done=%lu rejected=%lu result=%s\r\n",
                 nav_state_name(rt->state),
                 (int)g_motionRtStatus.state,
                 (unsigned long)rt->waiting_motion_cmd_id,
@@ -344,17 +344,17 @@ static bool nav_prepare_goto(Nav_Runtime_t *rt,
         rt->state != NAV_STATE_DONE &&
         rt->state != NAV_STATE_ERROR &&
         !internal_call) {
-        LOG_RAW("[NAV_CMD] error: busy, use nav stop first\r\n");
+        LOGE(LOG_MOD_NAV, "error: busy, use nav stop first\r\n");
         return false;
     }
 
     if (!nav_motion_idle()) {
-        LOG_RAW("[NAV_CMD] error: motion busy\r\n");
+        LOGE(LOG_MOD_NAV, "error: motion busy\r\n");
         return false;
     }
 
     if (!nav_get_pose(&pose)) {
-        LOG_RAW("[NAV_CMD] error: INS not ready\r\n");
+        LOGE(LOG_MOD_NAV, "error: INS not ready\r\n");
         return false;
     }
 
@@ -362,7 +362,7 @@ static bool nav_prepare_goto(Nav_Runtime_t *rt,
     dy = y_m - pose.y_m;
     dist = sqrtf((dx * dx) + (dy * dy));
     if (dist > NAV_MAX_LEG_M) {
-        LOG_RAW("[NAV_CMD] error: leg too long, max %.1fm\r\n", NAV_MAX_LEG_M);
+        LOGE(LOG_MOD_NAV, "error: leg too long, max %.1fm\r\n", NAV_MAX_LEG_M);
         return false;
     }
 
@@ -380,7 +380,7 @@ static bool nav_prepare_goto(Nav_Runtime_t *rt,
                                         : NAV_STATE_TURN_TO_TARGET;     /**< 未到达 → 先转向目标方向 */
     nav_reset_motion_wait(rt);
 
-    LOG_RAW("[NAV] goto target=(%+.3f,%+.3f,%+.1f) heading=%+.1f dist=%.3f\r\n",
+    LOGI(LOG_MOD_NAV, "goto target=(%+.3f,%+.3f,%+.1f) heading=%+.1f dist=%.3f\r\n",
             rt->target_x_m,
             rt->target_y_m,
             rt->target_yaw_deg,
@@ -394,19 +394,19 @@ static void nav_start_square(Nav_Runtime_t *rt, float side_m)
     INS_Pose_t pose;
 
     if (side_m <= 0.0f || side_m > NAV_MAX_LEG_M) {
-        LOG_RAW("[NAV_CMD] error: usage nav square <0..%.1fm>\r\n", NAV_MAX_LEG_M);
+        LOGE(LOG_MOD_NAV, "error: usage nav square <0..%.1fm>\r\n", NAV_MAX_LEG_M);
         return;
     }
 
     if (rt->state != NAV_STATE_IDLE &&
         rt->state != NAV_STATE_DONE &&
         rt->state != NAV_STATE_ERROR) {
-        LOG_RAW("[NAV_CMD] error: busy, use nav stop first\r\n");
+        LOGE(LOG_MOD_NAV, "error: busy, use nav stop first\r\n");
         return;
     }
 
     if (!nav_get_pose(&pose)) {
-        LOG_RAW("[NAV_CMD] error: INS not ready\r\n");
+        LOGE(LOG_MOD_NAV, "error: INS not ready\r\n");
         return;
     }
 
@@ -422,7 +422,7 @@ static void nav_start_square(Nav_Runtime_t *rt, float side_m)
     rt->state = NAV_STATE_SQUARE_DRIVE;
     nav_reset_motion_wait(rt);
 
-    LOG_RAW("[NAV] square start side=%.3fm pose=(%+.3f,%+.3f,%+.1f)\r\n",
+    LOGI(LOG_MOD_NAV, "square start side=%.3fm pose=(%+.3f,%+.3f,%+.1f)\r\n",
             side_m,
             pose.x_m,
             pose.y_m,
@@ -456,7 +456,7 @@ static void nav_handle_command(Nav_Runtime_t *rt, const Nav_Command_t *cmd)
             rt->state = NAV_STATE_IDLE;
             rt->square_active = false;
             nav_reset_motion_wait(rt);
-            LOG_RAW("[NAV] stop ok\r\n");
+            LOGI(LOG_MOD_NAV, "stop ok\r\n");
             break;
         case NAV_CMD_GOTO:
             (void)nav_prepare_goto(rt, cmd->x_m, cmd->y_m, cmd->yaw_deg, false);
@@ -465,7 +465,7 @@ static void nav_handle_command(Nav_Runtime_t *rt, const Nav_Command_t *cmd)
             nav_start_square(rt, cmd->side_m);
             break;
         default:
-            LOG_RAW("[NAV_CMD] error: bad command\r\n");
+            LOGE(LOG_MOD_NAV, "error: bad command\r\n");
             break;
     }
 }
@@ -480,7 +480,7 @@ static void nav_finish_goto(Nav_Runtime_t *rt)
 
     rt->state = NAV_STATE_DONE;
     nav_reset_motion_wait(rt);
-    LOG_RAW("[NAV] done target=(%+.3f,%+.3f,%+.1f) dist_err=%.3f yaw_err=%+.2f\r\n",
+    LOGI(LOG_MOD_NAV, "done target=(%+.3f,%+.3f,%+.1f) dist_err=%.3f yaw_err=%+.2f\r\n",
             rt->target_x_m,
             rt->target_y_m,
             rt->target_yaw_deg,
@@ -497,12 +497,12 @@ static void nav_finish_square(Nav_Runtime_t *rt)
     nav_reset_motion_wait(rt);
 
     if (nav_get_pose(&pose)) {
-        LOG_RAW("[NAV] square done pose=(%+.3f,%+.3f,%+.1f)\r\n",
+        LOGI(LOG_MOD_NAV, "square done pose=(%+.3f,%+.3f,%+.1f)\r\n",
                 pose.x_m,
                 pose.y_m,
                 pose.yaw_deg);
     } else {
-        LOG_RAW("[NAV] square done pose=not_ready\r\n");
+        LOGI(LOG_MOD_NAV, "square done pose=not_ready\r\n");
     }
 }
 
@@ -545,7 +545,7 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
             }
 
             if (!rt->motion_cmd_sent) {
-                LOG_RAW("[NAV] turn_to_target delta=%+.1f target_heading=%+.1f\r\n",
+                LOGI(LOG_MOD_NAV, "turn_to_target delta=%+.1f target_heading=%+.1f\r\n",
                         turn_delta,
                         rt->target_heading_deg);
                 if (!nav_start_motion_step(rt, MOTION_CMD_TURN, turn_delta)) {
@@ -578,7 +578,7 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
 
             if (!rt->motion_cmd_sent) {
                 rt->drive_distance_m = dist;
-                LOG_RAW("[NAV] drive_to_target dist=%.3f\r\n", dist);
+                LOGI(LOG_MOD_NAV, "drive_to_target dist=%.3f\r\n", dist);
                 if (!nav_start_motion_step(rt, MOTION_CMD_FWD, dist)) {
                     nav_enter_error(rt, "motion command failed");
                 } else {
@@ -605,7 +605,7 @@ static void nav_update_goto(Nav_Runtime_t *rt, const INS_Pose_t *pose)
             }
 
             if (!rt->motion_cmd_sent) {
-                LOG_RAW("[NAV] turn_to_final delta=%+.1f final_yaw=%+.1f\r\n",
+                LOGI(LOG_MOD_NAV, "turn_to_final delta=%+.1f final_yaw=%+.1f\r\n",
                         turn_delta,
                         rt->target_yaw_deg);
                 if (!nav_start_motion_step(rt, MOTION_CMD_TURN, turn_delta)) {
@@ -641,7 +641,7 @@ static void nav_update_square(Nav_Runtime_t *rt)
 
     if (rt->state == NAV_STATE_SQUARE_DRIVE) {
         if (!rt->motion_cmd_sent) {
-            LOG_RAW("[NAV] square drive %u/%u dist=%.3f\r\n",
+            LOGI(LOG_MOD_NAV, "square drive %u/%u dist=%.3f\r\n",
                     (unsigned)(rt->square_leg + 1U),
                     NAV_SQUARE_LEGS,
                     rt->square_side_m);
@@ -655,7 +655,7 @@ static void nav_update_square(Nav_Runtime_t *rt)
 
         motion_result = nav_motion_step_result(rt);
         if (motion_result > 0) {
-            log_printf_internal("[NAV_STEP] square drive done, enter square turn leg=%u/%u\r\n",
+            LOGD(LOG_MOD_NAV, "square drive done, enter square turn leg=%u/%u\r\n",
                                 (unsigned)(rt->square_leg + 1U),
                                 NAV_SQUARE_LEGS);
             rt->state = NAV_STATE_SQUARE_TURN;
@@ -668,14 +668,14 @@ static void nav_update_square(Nav_Runtime_t *rt)
 
     if (rt->state == NAV_STATE_SQUARE_TURN) {
         if (!rt->motion_cmd_sent) {
-            LOG_RAW("[NAV] square turn %u/%u yaw_delta=%+.1f\r\n",
+            LOGI(LOG_MOD_NAV, "square turn %u/%u yaw_delta=%+.1f\r\n",
                     (unsigned)(rt->square_leg + 1U),
                     NAV_SQUARE_LEGS,
                     NAV_SQUARE_TURN_DEG);
             if (!nav_start_motion_step(rt, MOTION_CMD_TURN, NAV_SQUARE_TURN_DEG)) {
                 nav_enter_error(rt, "motion command failed");
             } else {
-                log_printf_internal("[NAV_STEP] send square turn cmd_id=0x%08lX yaw_delta=%+.1f leg=%u/%u\r\n",
+                LOGD(LOG_MOD_NAV, "send square turn cmd_id=0x%08lX yaw_delta=%+.1f leg=%u/%u\r\n",
                                     (unsigned long)rt->waiting_motion_cmd_id,
                                     NAV_SQUARE_TURN_DEG,
                                     (unsigned)(rt->square_leg + 1U),
@@ -686,7 +686,7 @@ static void nav_update_square(Nav_Runtime_t *rt)
 
         motion_result = nav_motion_step_result(rt);
         if (motion_result > 0) {
-            log_printf_internal("[NAV_STEP] square turn done leg=%u/%u\r\n",
+            LOGD(LOG_MOD_NAV, "square turn done leg=%u/%u\r\n",
                                 (unsigned)(rt->square_leg + 1U),
                                 NAV_SQUARE_LEGS);
             rt->square_leg++;
@@ -746,8 +746,6 @@ void nav_task(void *pvParameters)
     (void)pvParameters;
     memset(&rt, 0, sizeof(rt));
     rt.state = NAV_STATE_IDLE;
-
-    LOG_INFO("[NAV] task ready: nav help\r\n");
 
     while (1) {
         while (g_navCmdQueue != NULL &&

@@ -36,7 +36,13 @@
 #define MAG2D_GATE_HIGH          1.45f
 #define MAG2D_MAX_TILT_DEG       25.0f
 
-IMU_DataGlobal_t g_imuDataGlobal = {{0.0f, 0.0f, 0.0f, 'G'}, NULL};
+IMU_DataGlobal_t g_imuDataGlobal = {{0.0f, 0.0f, 0.0f, 0.0f, false, 'G'}, NULL};
+static volatile IMU_InitStatus_t s_imuInitStatus = IMU_INIT_PENDING;
+
+IMU_InitStatus_t IMU_InitStatus_Get(void)
+{
+    return s_imuInitStatus;
+}
 
 bool IMU_Data_Read(IMU_Data_t *out)
 {
@@ -93,14 +99,15 @@ static void calibrate_gyro(GyroBias *bias)
     int loops = GYRO_CALIB_MS / IMU_TASK_PERIOD_MS;
 
     bias->gx = 0.0f; bias->gy = 0.0f; bias->gz = 0.0f;
-    LOG_RAW("[ATT] Keep still: gyro calib %ds\r\n", GYRO_CALIB_MS / 1000);
+    LOGI_INIT(LOG_MOD_IMU, "Keep still: gyro calib %ds\r\n", GYRO_CALIB_MS / 1000);
 
     for (int i = 0; i < loops; i++) {
         int16_t gx, gy, gz;
         if (PORT_IMU_IsOk()) {
-            PORT_IMU_ReadGyroRaw(&gx, &gy, &gz);
-            sx += gx; sy += gy; sz += gz;
-            samples++;
+            if (PORT_IMU_ReadGyroRaw(&gx, &gy, &gz)) {
+                sx += gx; sy += gy; sz += gz;
+                samples++;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(IMU_TASK_PERIOD_MS));
     }
@@ -110,7 +117,7 @@ static void calibrate_gyro(GyroBias *bias)
         bias->gy = ((float)sy / (float)samples) / GYRO_SENSITIVITY;
         bias->gz = ((float)sz / (float)samples) / GYRO_SENSITIVITY;
     }
-    LOG_RAW("[ATT] Gyro bias dps: %+.4f %+.4f %+.4f\r\n",
+    LOGI_INIT(LOG_MOD_IMU, "Gyro bias dps: %+.4f %+.4f %+.4f\r\n",
             bias->gx, bias->gy, bias->gz);
 }
 
@@ -127,10 +134,6 @@ static void calibrate_mag2d(Mag2DCal *cal)
     cal->radius = 1.0f;
     cal->quality = 0.0f;
     cal->valid = false;
-
-    LOG_RAW("[ATT] MAG2D: optional level rotate, window %ds\r\n",
-            MAG2D_CALIB_MS / 1000);
-    LOG_RAW("[ATT] MAG2D: if not rotating, gyro+bias lock will be used\r\n");
 
     for (int i = 0; i < loops; i++) {
         if (PORT_LIS3MDL_IsOk()) {
@@ -167,13 +170,12 @@ static void calibrate_mag2d(Mag2DCal *cal)
         }
     }
 
-    LOG_RAW("[ATT] MAG2D offset: %+.1f %+.1f\r\n",
-            cal->offset[0], cal->offset[1]);
-    LOG_RAW("[ATT] MAG2D scale : %+.3f %+.3f radius=%.1f quality=%.0f %s\r\n",
-            cal->scale[0], cal->scale[1], cal->radius, cal->quality,
-            cal->valid ? "OK" : "WARN");
+    LOGI_INIT(LOG_MOD_IMU,
+            "MAG2D: offset=%+.1f/%+.1f scale=%.3f/%.3f radius=%.1f quality=%.0f %s\r\n",
+            cal->offset[0], cal->offset[1], cal->scale[0], cal->scale[1],
+            cal->radius, cal->quality, cal->valid ? "OK" : "INVALID");
     if (!cal->valid) {
-        LOG_RAW("[ATT] MAG2D weak; yaw fallback to gyro + still bias lock\r\n");
+        LOGW_RELIABLE(LOG_MOD_IMU, "MAG2D calibration invalid\r\n");
     }
 }
 
@@ -238,7 +240,8 @@ static void imu_task(void *arg)
     PORT_LIS3MDL_Init();
 
     if (!PORT_IMU_IsOk()) {
-        LOG_RAW("[ATT] ICM not ready; attitude task stopped\r\n");
+        LOGE(LOG_MOD_IMU, "ICM not ready; attitude task stopped\r\n");
+        s_imuInitStatus = IMU_INIT_FAILED;
         vTaskDelete(NULL);
         return;
     }
@@ -247,6 +250,8 @@ static void imu_task(void *arg)
     calibrate_mag2d(&magCal);
     ahrs9_init(&cfg);
     ahrs9_reset_yaw();
+    s_imuInitStatus = IMU_INIT_READY;
+    LOGI_INIT(LOG_MOD_IMU, "IMU startup calibration complete\r\n");
     lastWake = xTaskGetTickCount();
     lastPrint = lastWake;
 
@@ -259,8 +264,19 @@ static void imu_task(void *arg)
         bool stillLock = false;
         float rollPrev = 0.0f, pitchPrev = 0.0f;
 
-        PORT_IMU_ReadAccelRaw(&ax, &ay, &az);
-        PORT_IMU_ReadGyroRaw(&gx, &gy, &gz);
+        bool accelValid = PORT_IMU_ReadAccelRaw(&ax, &ay, &az);
+        bool gyroValid = PORT_IMU_ReadGyroRaw(&gx, &gy, &gz);
+
+        if (!accelValid || !gyroValid) {
+            IMU_Data_t data;
+            ahrs9_get_euler(&data.roll, &data.pitch, &data.yaw);
+            data.gyro_z_dps = 0.0f;
+            data.gyro_z_valid = false;
+            data.yawSource = 'G';
+            IMU_Data_Write(&data);
+            vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(IMU_TASK_PERIOD_MS));
+            continue;
+        }
 
         axf = imu_lowpass((float)ax / ACCEL_SENSITIVITY, axf, ACCEL_LP_ALPHA);
         ayf = imu_lowpass((float)ay / ACCEL_SENSITIVITY, ayf, ACCEL_LP_ALPHA);
@@ -296,6 +312,8 @@ static void imu_task(void *arg)
         {
             IMU_Data_t data;
             ahrs9_get_euler(&data.roll, &data.pitch, &data.yaw);
+            data.gyro_z_dps = gzDps;
+            data.gyro_z_valid = true;
             data.yawSource = magUsed ? 'M' : (stillLock ? 'B' : 'G');
             IMU_Data_Write(&data);
         }
@@ -305,10 +323,8 @@ static void imu_task(void *arg)
             char yawSource = magUsed ? 'M' : (stillLock ? 'B' : 'G');
             lastPrint = xTaskGetTickCount();
             ahrs9_get_euler(&roll, &pitch, &yaw);
-#if LOG_PRINT_ATT_ENABLE
-            LOG_RAW("[ATT] R:%+7.2f P:%+7.2f Y:%+7.2f YSRC:%c\r\n",
+            LOGD(LOG_MOD_IMU, "R:%+7.2f P:%+7.2f Y:%+7.2f YSRC:%c\r\n",
                     roll, pitch, yaw, yawSource);
-#endif
         }
 
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(IMU_TASK_PERIOD_MS));
@@ -317,9 +333,11 @@ static void imu_task(void *arg)
 
 void app_imu_start(void)
 {
+    s_imuInitStatus = IMU_INIT_PENDING;
     g_imuDataGlobal.lock = xSemaphoreCreateMutex();
     if (g_imuDataGlobal.lock == NULL) {
-        LOG_RAW("[ATT] IMU mutex create failed\r\n");
+        LOGE(LOG_MOD_IMU, "IMU mutex create failed\r\n");
+        s_imuInitStatus = IMU_INIT_FAILED;
         return;
     }
     TaskHandle_t imuHandle = NULL;
@@ -330,5 +348,8 @@ void app_imu_start(void)
         app_stack_monitor_set_task(APP_STACK_MON_IMU,
                                    imuHandle,
                                    IMU_TASK_STACK_SIZE);
+    } else {
+        LOGE(LOG_MOD_IMU, "IMU task create failed\r\n");
+        s_imuInitStatus = IMU_INIT_FAILED;
     }
 }

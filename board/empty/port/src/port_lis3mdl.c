@@ -36,7 +36,7 @@ static void delay_ms(uint32_t ms)
 
 static void i2c_log_status(const char *phase, uint8_t addr, uint32_t status)
 {
-    LOG_RAW("[I2C] %s addr=0x%02X status=0x%08lX%s%s%s\r\n",
+    LOGE(LOG_MOD_MAG, "%s addr=0x%02X status=0x%08lX%s%s%s\r\n",
             phase, addr, (unsigned long)status,
             (status & DL_I2C_CONTROLLER_STATUS_ERROR) ? " ERROR" : "",
             (status & DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST) ? " ARB_LOST" : "",
@@ -102,20 +102,20 @@ static void i2c_bus_diag_once(void)
     if (g_i2c_diag_done) return;
     g_i2c_diag_done = true;
 
-    LOG_RAW("[I2C] Lines: SDA=%s SCL=%s status=0x%08lX\r\n",
+    LOGD(LOG_MOD_MAG, "Lines: SDA=%s SCL=%s status=0x%08lX\r\n",
             (DL_I2C_getSDAStatus(I2C_0_INST) == DL_I2C_CONTROLLER_SDA_HIGH) ? "HIGH" : "LOW",
             (DL_I2C_getSCLStatus(I2C_0_INST) == DL_I2C_CONTROLLER_SCL_HIGH) ? "HIGH" : "LOW",
             (unsigned long)DL_I2C_getControllerStatus(I2C_0_INST));
 
-    LOG_RAW("[I2C] Scan start\r\n");
+    LOGD(LOG_MOD_MAG, "Scan start\r\n");
     for (addr = 0x08; addr <= 0x77; addr++) {
         if (i2c_probe_addr(addr)) {
             found = true;
-            LOG_RAW("[I2C] ACK addr=0x%02X\r\n", addr);
+            LOGD(LOG_MOD_MAG, "ACK addr=0x%02X\r\n", addr);
         }
     }
     if (!found) {
-        LOG_RAW("[I2C] Scan found no ACK devices\r\n");
+        LOGD(LOG_MOD_MAG, "Scan found no ACK devices\r\n");
     }
 }
 
@@ -125,7 +125,7 @@ static bool i2c_write_reg(uint8_t reg, uint8_t data)
 
     i2c_prepare_transfer();
     if (DL_I2C_fillControllerTXFIFO(I2C_0_INST, txBuf, 2) != 2U) {
-        LOG_RAW("[LIS3MDL] TX FIFO fill failed\r\n");
+        LOGE(LOG_MOD_MAG, "TX FIFO fill failed\r\n");
         return false;
     }
     DL_I2C_startControllerTransfer(I2C_0_INST, LIS3MDL_I2C_ADDR,
@@ -139,7 +139,7 @@ static bool i2c_read_reg(uint8_t reg, uint8_t *value)
 
     i2c_prepare_transfer();
     if (DL_I2C_fillControllerTXFIFO(I2C_0_INST, &reg, 1) != 1U) {
-        LOG_RAW("[LIS3MDL] TX FIFO fill failed\r\n");
+        LOGE(LOG_MOD_MAG, "TX FIFO fill failed\r\n");
         return false;
     }
     DL_I2C_startControllerTransferAdvanced(I2C_0_INST, LIS3MDL_I2C_ADDR,
@@ -154,7 +154,7 @@ static bool i2c_read_reg(uint8_t reg, uint8_t *value)
     if (!i2c_wait_done("READ", LIS3MDL_I2C_ADDR)) return false;
 
     if (DL_I2C_getControllerRXFIFOCounter(I2C_0_INST) < 1U) {
-        LOG_RAW("[LIS3MDL] READ RX_EMPTY status=0x%08lX\r\n",
+        LOGE(LOG_MOD_MAG, "READ RX_EMPTY status=0x%08lX\r\n",
                 (unsigned long)DL_I2C_getControllerStatus(I2C_0_INST));
         return false;
     }
@@ -169,7 +169,7 @@ static bool i2c_read_regs(uint8_t reg, uint8_t *buf, uint16_t len)
 
     i2c_prepare_transfer();
     if (DL_I2C_fillControllerTXFIFO(I2C_0_INST, &reg, 1) != 1U) {
-        LOG_RAW("[LIS3MDL] TX FIFO fill failed\r\n");
+        LOGE(LOG_MOD_MAG, "TX FIFO fill failed\r\n");
         return false;
     }
     DL_I2C_startControllerTransferAdvanced(I2C_0_INST, LIS3MDL_I2C_ADDR,
@@ -184,7 +184,7 @@ static bool i2c_read_regs(uint8_t reg, uint8_t *buf, uint16_t len)
     if (!i2c_wait_done("READS", LIS3MDL_I2C_ADDR)) return false;
 
     if (DL_I2C_getControllerRXFIFOCounter(I2C_0_INST) < len) {
-        LOG_RAW("[LIS3MDL] READS RX_EMPTY count=%lu need=%u status=0x%08lX\r\n",
+        LOGE(LOG_MOD_MAG, "READS RX_EMPTY count=%lu need=%u status=0x%08lX\r\n",
                 (unsigned long)DL_I2C_getControllerRXFIFOCounter(I2C_0_INST),
                 len, (unsigned long)DL_I2C_getControllerStatus(I2C_0_INST));
         return false;
@@ -197,22 +197,19 @@ static bool i2c_read_regs(uint8_t reg, uint8_t *buf, uint16_t len)
 void PORT_LIS3MDL_Init(void)
 {
     uint8_t whoami;
-    LOG_RAW("[LIS3MDL] Init start (I2C addr=0x%02X)\n", LIS3MDL_I2C_ADDR);
     i2c_bus_diag_once();
     delay_ms(10);
     if (!i2c_read_reg(REG_WHO_AM_I, &whoami)) {
         g_lis3mdl_init_ok = false;
-        LOG_RAW("[LIS3MDL] FAIL: WHO_AM_I read failed!\n");
+        LOGE(LOG_MOD_MAG, "FAIL: WHO_AM_I read failed!\n");
         return;
     }
-    LOG_RAW("[LIS3MDL] WHO_AM_I = 0x%02X (expected 0x3D)\n", whoami);
     if (whoami != 0x3D) {
         g_lis3mdl_init_ok = false;
-        LOG_RAW("[LIS3MDL] FAIL!\n");
+        LOGE(LOG_MOD_MAG, "FAIL!\n");
         return;
     }
-    LOG_RAW("[LIS3MDL] I2C OK\n");
-    if (!i2c_write_reg(REG_CTRL_REG2, 0x04)) { g_lis3mdl_init_ok = false; LOG_RAW("[LIS3MDL] FAIL: reset write failed!\n"); return; }
+    if (!i2c_write_reg(REG_CTRL_REG2, 0x04)) { g_lis3mdl_init_ok = false; LOGE(LOG_MOD_MAG, "FAIL: reset write failed!\n"); return; }
     delay_ms(10);
     if (!i2c_write_reg(REG_CTRL_REG1, 0x7C) ||
         !i2c_write_reg(REG_CTRL_REG2, 0x60) ||
@@ -220,11 +217,12 @@ void PORT_LIS3MDL_Init(void)
         !i2c_write_reg(REG_CTRL_REG4, 0x0C) ||
         !i2c_write_reg(REG_CTRL_REG5, 0x00)) {
         g_lis3mdl_init_ok = false;
-        LOG_RAW("[LIS3MDL] FAIL: config write failed!\n");
+        LOGE(LOG_MOD_MAG, "FAIL: config write failed!\n");
         return;
     }
     g_lis3mdl_init_ok = true;
-    LOG_RAW("[LIS3MDL] Init completed (I2C)\n");
+    LOGI_INIT(LOG_MOD_MAG, "LIS3MDL ready: addr=0x%02X WHO_AM_I=0x%02X\r\n",
+            LIS3MDL_I2C_ADDR, whoami);
 }
 
 bool PORT_LIS3MDL_IsOk(void) { return g_lis3mdl_init_ok; }

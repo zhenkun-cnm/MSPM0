@@ -17,7 +17,7 @@ void led_task(void *pvParameters)
     /* 获取 LED 设备句柄（OOP 契约） */
     DevLED *led = GetLED();
     if (led == NULL) {
-        LOG_ERROR("LED device handle is NULL!\r\n");
+        LOGE(LOG_MOD_LED, "LED device handle is NULL!\r\n");
         vTaskDelete(NULL);
         return;
     }
@@ -25,7 +25,7 @@ void led_task(void *pvParameters)
     /* 初始化 LED */
     led->init(led);
 
-    LOG_DEBUG("LED task running, toggle every 500ms\r\n");
+    LOGD(LOG_MOD_LED, "LED task running, toggle every 500ms\r\n");
 
     while (1)
     {

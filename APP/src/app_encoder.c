@@ -45,11 +45,11 @@ void encoder_task(void *pvParameters)
             }
 
             if (evt == ENCODER_EVT_CW) {
-                LOG_INFO("RIGHT\r\n");
+                LOGI(LOG_MOD_ENCODER, "RIGHT\r\n");
             } else if (evt == ENCODER_EVT_CCW) {
-                LOG_INFO("LEFT\r\n");
+                LOGI(LOG_MOD_ENCODER, "LEFT\r\n");
             } else {
-                LOG_INFO("KEY: %s\r\n",
+                LOGI(LOG_MOD_ENCODER, "KEY: %s\r\n",
                          PORT_ENCODER_EventToStr(evt));
             }
         }

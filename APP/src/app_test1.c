@@ -137,12 +137,12 @@ static bool test1_send_motion_raw(Motion_CommandType_t type, float value, uint32
     cmd.cmd_id = cmd_id;
 
     if (g_motionCmdQueue == NULL) {
-        LOG_RAW("[TEST1] error: motion queue not ready\r\n");
+        LOGE(LOG_MOD_TEST1, "error: motion queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_motionCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[TEST1] error: motion queue full\r\n");
+        LOGE(LOG_MOD_TEST1, "error: motion queue full\r\n");
         return false;
     }
 
@@ -163,7 +163,7 @@ static bool test1_start_motion_step(Test1_Runtime_t *rt, Motion_CommandType_t ty
     uint32_t cmd_id;
 
     if (!test1_motion_idle()) {
-        LOG_RAW("[TEST1] error: motion busy\r\n");
+        LOGE(LOG_MOD_TEST1, "error: motion busy\r\n");
         return false;
     }
 
@@ -197,7 +197,7 @@ static const char *test1_motion_type_name(Motion_CommandType_t type)
 
 static void test1_step_send_motion(const Test1_Runtime_t *rt, Motion_CommandType_t type, float value)
 {
-    log_printf_internal("[TEST1_STEP] send motion cmd_id=0x%08lX type=%s value=%+.3f state=%s\r\n",
+    LOGD(LOG_MOD_TEST1, "send motion cmd_id=0x%08lX type=%s value=%+.3f state=%s\r\n",
                         (unsigned long)rt->waiting_motion_cmd_id,
                         test1_motion_type_name(type),
                         value,
@@ -213,7 +213,7 @@ static int8_t test1_motion_step_result(Test1_Runtime_t *rt)
     }
 
     if (g_motionRtStatus.rejected_cmd_id == rt->waiting_motion_cmd_id) {
-        log_printf_internal("[TEST1_STEP] motion rejected cmd_id=0x%08lX\r\n",
+        LOGD(LOG_MOD_TEST1, "motion rejected cmd_id=0x%08lX\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id);
         return -1;
     }
@@ -226,7 +226,7 @@ static int8_t test1_motion_step_result(Test1_Runtime_t *rt)
         if (g_motionRtStatus.last_result == MOTION_RESULT_DONE) {
             return 1;
         }
-        log_printf_internal("[TEST1_STEP] motion finished cmd_id=0x%08lX result=%s\r\n",
+        LOGD(LOG_MOD_TEST1, "motion finished cmd_id=0x%08lX result=%s\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id,
                             test1_motion_result_name(g_motionRtStatus.last_result));
         return -1;
@@ -234,7 +234,7 @@ static int8_t test1_motion_step_result(Test1_Runtime_t *rt)
 
     elapsed_ms = (uint32_t)((xTaskGetTickCount() - rt->motion_cmd_tick) * portTICK_PERIOD_MS);
     if (!rt->motion_accepted && elapsed_ms >= TEST1_MOTION_START_TIMEOUT_MS) {
-        log_printf_internal("[TEST1_STEP] motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
+        LOGD(LOG_MOD_TEST1, "motion did not start cmd_id=0x%08lX state=%d active=0x%08lX done=0x%08lX result=%s\r\n",
                             (unsigned long)rt->waiting_motion_cmd_id,
                             (int)g_motionRtStatus.state,
                             (unsigned long)g_motionRtStatus.active_cmd_id,
@@ -251,7 +251,7 @@ static void test1_enter_error(Test1_Runtime_t *rt, const char *reason)
     (void)test1_send_motion_raw(MOTION_CMD_STOP, 0.0f, 0U);
     rt->state = TEST1_STATE_ERROR;
     test1_reset_motion_wait(rt);
-    LOG_RAW("[TEST1] error: %s\r\n", reason);
+    LOGE(LOG_MOD_TEST1, "error: %s\r\n", reason);
 }
 
 static void test1_load_point(Test1_Runtime_t *rt, uint8_t index, const INS_Pose_t *pose)
@@ -275,7 +275,7 @@ static void test1_load_point(Test1_Runtime_t *rt, uint8_t index, const INS_Pose_
                                           : TEST1_STATE_TURN_TO_TARGET;
     test1_reset_motion_wait(rt);
 
-    LOG_RAW("[TEST1] goto %u/%u target=(%+.3f,%+.3f) heading=%+.1f dist=%.3f\r\n",
+    LOGI(LOG_MOD_TEST1, "goto %u/%u target=(%+.3f,%+.3f) heading=%+.1f dist=%.3f\r\n",
             (unsigned)(index + 1U),
             TEST1_POINT_COUNT,
             rt->target_x_m,
@@ -286,11 +286,11 @@ static void test1_load_point(Test1_Runtime_t *rt, uint8_t index, const INS_Pose_
 
 static void test1_print_help(void)
 {
-    LOG_RAW("[TEST1] commands:\r\n");
-    LOG_RAW("  test1 help\r\n");
-    LOG_RAW("  test1 start\r\n");
-    LOG_RAW("  test1 status\r\n");
-    LOG_RAW("  test1 stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_TEST1, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_TEST1, "  test1 help\r\n");
+    LOGI_RELIABLE(LOG_MOD_TEST1, "  test1 start\r\n");
+    LOGI_RELIABLE(LOG_MOD_TEST1, "  test1 status\r\n");
+    LOGI_RELIABLE(LOG_MOD_TEST1, "  test1 stop\r\n");
 }
 
 static void test1_print_status(Test1_Runtime_t *rt)
@@ -300,7 +300,7 @@ static void test1_print_status(Test1_Runtime_t *rt)
     if (test1_get_pose(&pose)) {
         (void)test1_distance_to_target(rt, &pose);
         rt->yaw_error_deg = test1_wrap_180(rt->target_heading_deg - pose.yaw_deg);
-        LOG_RAW("[TEST1] state=%s point=%u/%u pose=(%+.3f,%+.3f,%+.1f) target=(%+.3f,%+.3f) dist_err=%.3f yaw_err=%+.2f wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
+        LOGI_RELIABLE(LOG_MOD_TEST1, "state=%s point=%u/%u pose=(%+.3f,%+.3f,%+.1f) target=(%+.3f,%+.3f) dist_err=%.3f yaw_err=%+.2f wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
                 test1_state_name(rt->state),
                 (unsigned)(rt->point_index + 1U),
                 TEST1_POINT_COUNT,
@@ -317,7 +317,7 @@ static void test1_print_status(Test1_Runtime_t *rt)
                 (unsigned long)g_motionRtStatus.rejected_cmd_id,
                 test1_motion_result_name(g_motionRtStatus.last_result));
     } else {
-        LOG_RAW("[TEST1] state=%s pose=not_ready wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
+        LOGI_RELIABLE(LOG_MOD_TEST1, "state=%s pose=not_ready wait=0x%08lX active=0x%08lX done=0x%08lX rejected=0x%08lX result=%s\r\n",
                 test1_state_name(rt->state),
                 (unsigned long)rt->waiting_motion_cmd_id,
                 (unsigned long)g_motionRtStatus.active_cmd_id,
@@ -332,16 +332,16 @@ static void test1_start(Test1_Runtime_t *rt)
     INS_Pose_t pose;
 
     if (!test1_get_pose(&pose)) {
-        LOG_RAW("[TEST1] error: INS not ready\r\n");
+        LOGE(LOG_MOD_TEST1, "error: INS not ready\r\n");
         return;
     }
     if (!test1_motion_idle()) {
-        LOG_RAW("[TEST1] error: motion busy, use test1 stop first\r\n");
+        LOGE(LOG_MOD_TEST1, "error: motion busy, use test1 stop first\r\n");
         return;
     }
 
     memset(rt, 0, sizeof(*rt));
-    LOG_RAW("[TEST1] start\r\n");
+    LOGI(LOG_MOD_TEST1, "start\r\n");
     test1_load_point(rt, 0U, &pose);
 }
 
@@ -359,7 +359,7 @@ static void test1_handle_command(Test1_Runtime_t *rt, const Test1_Command_t *cmd
             if (rt->state != TEST1_STATE_IDLE &&
                 rt->state != TEST1_STATE_DONE &&
                 rt->state != TEST1_STATE_ERROR) {
-                LOG_RAW("[TEST1] error: busy, use test1 stop first\r\n");
+                LOGE(LOG_MOD_TEST1, "error: busy, use test1 stop first\r\n");
             } else {
                 test1_start(rt);
             }
@@ -371,10 +371,10 @@ static void test1_handle_command(Test1_Runtime_t *rt, const Test1_Command_t *cmd
             (void)test1_send_motion_raw(MOTION_CMD_STOP, 0.0f, 0U);
             rt->state = TEST1_STATE_IDLE;
             test1_reset_motion_wait(rt);
-            LOG_RAW("[TEST1] stop ok\r\n");
+            LOGI(LOG_MOD_TEST1, "stop ok\r\n");
             break;
         default:
-            LOG_RAW("[TEST1] error: bad command\r\n");
+            LOGE(LOG_MOD_TEST1, "error: bad command\r\n");
             break;
     }
 }
@@ -386,12 +386,12 @@ static void test1_finish_route(Test1_Runtime_t *rt)
     rt->state = TEST1_STATE_DONE;
     test1_reset_motion_wait(rt);
     if (test1_get_pose(&pose)) {
-        LOG_RAW("[TEST1] done pose=(%+.3f,%+.3f,%+.1f)\r\n",
+        LOGI(LOG_MOD_TEST1, "done pose=(%+.3f,%+.3f,%+.1f)\r\n",
                 pose.x_m,
                 pose.y_m,
                 pose.yaw_deg);
     } else {
-        LOG_RAW("[TEST1] done pose=not_ready\r\n");
+        LOGI(LOG_MOD_TEST1, "done pose=not_ready\r\n");
     }
 }
 
@@ -417,7 +417,7 @@ static void test1_update(Test1_Runtime_t *rt)
         case TEST1_STATE_TURN_TO_TARGET:
             dist = test1_distance_to_target(rt, &pose);
             if (dist <= TEST1_POS_TOL_M) {
-                log_printf_internal("[TEST1_STEP] already at point, enter RIGHT_TURN point=%u/%u\r\n",
+                LOGD(LOG_MOD_TEST1, "already at point, enter RIGHT_TURN point=%u/%u\r\n",
                                     (unsigned)(rt->point_index + 1U),
                                     TEST1_POINT_COUNT);
                 rt->state = TEST1_STATE_RIGHT_TURN;
@@ -432,7 +432,7 @@ static void test1_update(Test1_Runtime_t *rt)
 
             if (!rt->motion_cmd_sent) {
                 if (fabsf(turn_delta) <= TEST1_YAW_TOL_DEG) {
-                    log_printf_internal("[TEST1_STEP] heading ok, enter DRIVE point=%u/%u\r\n",
+                    LOGD(LOG_MOD_TEST1, "heading ok, enter DRIVE point=%u/%u\r\n",
                                         (unsigned)(rt->point_index + 1U),
                                         TEST1_POINT_COUNT);
                     rt->state = TEST1_STATE_DRIVE_TO_TARGET;
@@ -440,7 +440,7 @@ static void test1_update(Test1_Runtime_t *rt)
                     break;
                 }
 
-                LOG_RAW("[TEST1] turn_to_target delta=%+.1f target_heading=%+.1f\r\n",
+                LOGI(LOG_MOD_TEST1, "turn_to_target delta=%+.1f target_heading=%+.1f\r\n",
                         turn_delta,
                         rt->target_heading_deg);
                 if (!test1_start_motion_step(rt, MOTION_CMD_TURN, turn_delta)) {
@@ -451,7 +451,7 @@ static void test1_update(Test1_Runtime_t *rt)
             } else {
                 motion_result = test1_motion_step_result(rt);
                 if (motion_result > 0) {
-                    log_printf_internal("[TEST1_STEP] turn_to_target done, enter DRIVE point=%u/%u\r\n",
+                    LOGD(LOG_MOD_TEST1, "turn_to_target done, enter DRIVE point=%u/%u\r\n",
                                         (unsigned)(rt->point_index + 1U),
                                         TEST1_POINT_COUNT);
                     rt->state = TEST1_STATE_DRIVE_TO_TARGET;
@@ -466,7 +466,7 @@ static void test1_update(Test1_Runtime_t *rt)
             dist = test1_distance_to_target(rt, &pose);
             if (dist <= TEST1_POS_TOL_M || dist <= TEST1_MIN_DRIVE_M) {
                 if (rt->motion_cmd_sent) {
-                    log_printf_internal("[TEST1_STEP] drive arrived, stopping motion point=%u/%u dist=%.3f\r\n",
+                    LOGD(LOG_MOD_TEST1, "drive arrived, stopping motion point=%u/%u dist=%.3f\r\n",
                                         (unsigned)(rt->point_index + 1U),
                                         TEST1_POINT_COUNT,
                                         dist);
@@ -474,7 +474,7 @@ static void test1_update(Test1_Runtime_t *rt)
                     test1_reset_motion_wait(rt);
                     break;
                 }
-                log_printf_internal("[TEST1_STEP] drive stopped, enter RIGHT_TURN point=%u/%u dist=%.3f\r\n",
+                LOGD(LOG_MOD_TEST1, "drive stopped, enter RIGHT_TURN point=%u/%u dist=%.3f\r\n",
                                     (unsigned)(rt->point_index + 1U),
                                     TEST1_POINT_COUNT,
                                     dist);
@@ -488,7 +488,7 @@ static void test1_update(Test1_Runtime_t *rt)
             }
 
             if (!rt->motion_cmd_sent) {
-                LOG_RAW("[TEST1] drive dist=%.3f\r\n", dist);
+                LOGI(LOG_MOD_TEST1, "drive dist=%.3f\r\n", dist);
                 if (!test1_start_motion_step(rt, MOTION_CMD_FWD, dist)) {
                     test1_enter_error(rt, "motion command failed");
                 } else {
@@ -497,7 +497,7 @@ static void test1_update(Test1_Runtime_t *rt)
             } else {
                 motion_result = test1_motion_step_result(rt);
                 if (motion_result > 0) {
-                    log_printf_internal("[TEST1_STEP] drive done, enter RIGHT_TURN point=%u/%u\r\n",
+                    LOGD(LOG_MOD_TEST1, "drive done, enter RIGHT_TURN point=%u/%u\r\n",
                                         (unsigned)(rt->point_index + 1U),
                                         TEST1_POINT_COUNT);
                     rt->state = TEST1_STATE_RIGHT_TURN;
@@ -505,7 +505,7 @@ static void test1_update(Test1_Runtime_t *rt)
                 } else if (motion_result < 0) {
                     if (dist <= TEST1_POS_TOL_M &&
                         g_motionRtStatus.last_result == MOTION_RESULT_STOPPED) {
-                        log_printf_internal("[TEST1_STEP] drive stopped by STOP, enter RIGHT_TURN point=%u/%u\r\n",
+                        LOGD(LOG_MOD_TEST1, "drive stopped by STOP, enter RIGHT_TURN point=%u/%u\r\n",
                                             (unsigned)(rt->point_index + 1U),
                                             TEST1_POINT_COUNT);
                         rt->state = TEST1_STATE_RIGHT_TURN;
@@ -519,14 +519,14 @@ static void test1_update(Test1_Runtime_t *rt)
 
         case TEST1_STATE_RIGHT_TURN:
             if (!rt->motion_cmd_sent) {
-                LOG_RAW("[TEST1] right_turn %u/%u yaw_delta=%+.1f\r\n",
+                LOGI(LOG_MOD_TEST1, "right_turn %u/%u yaw_delta=%+.1f\r\n",
                         (unsigned)(rt->point_index + 1U),
                         TEST1_POINT_COUNT,
                         TEST1_RIGHT_TURN_DEG);
                 if (!test1_start_motion_step(rt, MOTION_CMD_TURN, TEST1_RIGHT_TURN_DEG)) {
                     test1_enter_error(rt, "motion command failed");
                 } else {
-                    log_printf_internal("[TEST1_STEP] send right turn cmd_id=0x%08lX yaw_delta=%+.1f point=%u/%u\r\n",
+                    LOGD(LOG_MOD_TEST1, "send right turn cmd_id=0x%08lX yaw_delta=%+.1f point=%u/%u\r\n",
                                         (unsigned long)rt->waiting_motion_cmd_id,
                                         TEST1_RIGHT_TURN_DEG,
                                         (unsigned)(rt->point_index + 1U),
@@ -536,7 +536,7 @@ static void test1_update(Test1_Runtime_t *rt)
                 motion_result = test1_motion_step_result(rt);
                 if (motion_result > 0) {
                     uint8_t next = (uint8_t)(rt->point_index + 1U);
-                    log_printf_internal("[TEST1_STEP] right turn done point=%u/%u\r\n",
+                    LOGD(LOG_MOD_TEST1, "right turn done point=%u/%u\r\n",
                                         (unsigned)(rt->point_index + 1U),
                                         TEST1_POINT_COUNT);
                     test1_reset_motion_wait(rt);
@@ -564,8 +564,6 @@ void test1_task(void *pvParameters)
     (void)pvParameters;
     memset(&rt, 0, sizeof(rt));
     rt.state = TEST1_STATE_IDLE;
-
-    LOG_INFO("[TEST1] task ready: test1 help\r\n");
 
     while (1) {
         while (g_test1CmdQueue != NULL &&

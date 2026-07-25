@@ -30,7 +30,7 @@
 #include <stdio.h>
 
 #define START_TASK_STACK_WORDS       256U
-#define ENCODER_TASK_STACK_WORDS     96U
+#define ENCODER_TASK_STACK_WORDS     140U
 #define TFT_TASK_STACK_WORDS         256U
 #define TB6612_TASK_STACK_WORDS      96U
 #define MOTOR_ENC_TASK_STACK_WORDS   256U
@@ -39,7 +39,7 @@
 #define MOTION_TASK_STACK_WORDS      192U
 #define NAV_TASK_STACK_WORDS         160U
 #define PATH_TASK_STACK_WORDS        384U
-#define GRAY_TASK_STACK_WORDS        128U
+#define GRAY_TASK_STACK_WORDS        154U
 #define GRAYLINE_TASK_STACK_WORDS    192U
 #define FLASH_TASK_STACK_WORDS       192U
 #define TEST1_TASK_STACK_WORDS       384U
@@ -111,48 +111,48 @@ static void start_task(void *pvParameters)
 
     g_menuEvtQueue = xQueueCreate(MENU_EVT_QUEUE_LEN, sizeof(DevEncoder_Event_t));
     if (g_menuEvtQueue == NULL) {
-        LOG_ERROR("[INIT] menu event queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "menu event queue create failed!\r\n");
     }
 
     g_motorCmdQueue = xQueueCreate(MOTOR_CMD_QUEUE_LEN, sizeof(MotorCmd));
     if (g_motorCmdQueue == NULL) {
-        LOG_ERROR("[INIT] motor cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "motor cmd queue create failed!\r\n");
     }
 
     g_insPoseGlobal.lock = xSemaphoreCreateMutex();
     if (g_insPoseGlobal.lock == NULL) {
-        LOG_ERROR("[INIT] INS pose mutex create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "INS pose mutex create failed!\r\n");
     }
 
     g_insCmdQueue = xQueueCreate(INS_CMD_QUEUE_LEN, sizeof(INS_Command_t));
     if (g_insCmdQueue == NULL) {
-        LOG_ERROR("[INIT] INS cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "INS cmd queue create failed!\r\n");
     }
 
     g_motionCmdQueue = xQueueCreate(MOTION_CMD_QUEUE_LEN, sizeof(Motion_Command_t));
     if (g_motionCmdQueue == NULL) {
-        LOG_ERROR("[INIT] motion cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "motion cmd queue create failed!\r\n");
     }
 
     g_navCmdQueue = xQueueCreate(NAV_CMD_QUEUE_LEN, sizeof(Nav_Command_t));
     if (g_navCmdQueue == NULL) {
-        LOG_ERROR("[INIT] nav cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "nav cmd queue create failed!\r\n");
     }
 
     g_pathCmdQueue = xQueueCreate(PATH_CMD_QUEUE_LEN, sizeof(Path_Command_t));
     if (g_pathCmdQueue == NULL) {
-        LOG_ERROR("[INIT] path cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "path cmd queue create failed!\r\n");
     }
 
     g_grayLineCmdQueue = xQueueCreate(GRAYLINE_CMD_QUEUE_LEN, sizeof(GrayLine_Command_t));
     if (g_grayLineCmdQueue == NULL) {
-        LOG_ERROR("[INIT] grayline cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "grayline cmd queue create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE
     g_test1CmdQueue = xQueueCreate(TEST1_CMD_QUEUE_LEN, sizeof(Test1_Command_t));
     if (g_test1CmdQueue == NULL) {
-        LOG_ERROR("[INIT] test1 cmd queue create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "test1 cmd queue create failed!\r\n");
     }
 #endif
 
@@ -166,7 +166,7 @@ static void start_task(void *pvParameters)
                                    s_encoderTaskHandle,
                                    ENCODER_TASK_STACK_WORDS);
     } else {
-        LOG_ERROR("[INIT] encoder task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "encoder task create failed!\r\n");
     }
 
     if (xTaskCreate(tft_task,
@@ -178,9 +178,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_TFT,
                                    s_tftTaskHandle,
                                    TFT_TASK_STACK_WORDS);
-        LOG_INFO("  TFT task created (prio=1)\r\n");
     } else {
-        LOG_ERROR("[INIT] TFT task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "TFT task create failed!\r\n");
     }
 
     if (xTaskCreate(tb6612_task,
@@ -192,9 +191,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_TB6612,
                                    s_tb6612TaskHandle,
                                    TB6612_TASK_STACK_WORDS);
-        LOG_INFO("  TB6612 task created (prio=3)\r\n");
     } else {
-        LOG_ERROR("[INIT] TB6612 task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "TB6612 task create failed!\r\n");
     }
 
     if (xTaskCreate(motor_encoder_task,
@@ -206,9 +204,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_MOTOR_ENC,
                                    s_motorEncoderTaskHandle,
                                    MOTOR_ENC_TASK_STACK_WORDS);
-        LOG_INFO("  Motor encoder task created (prio=3)\r\n");
     } else {
-        LOG_ERROR("[INIT] motor encoder task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "motor encoder task create failed!\r\n");
     }
 
     app_imu_start();
@@ -222,9 +219,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_INS,
                                    s_insTaskHandle,
                                    INS_TASK_STACK_WORDS);
-        LOG_INFO("  INS task created (prio=4)\r\n");
     } else {
-        LOG_ERROR("[INIT] INS task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "INS task create failed!\r\n");
     }
 
     if (xTaskCreate(ins_cmd_task,
@@ -236,9 +232,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_INS_CMD,
                                    s_insCmdTaskHandle,
                                    INS_CMD_TASK_STACK_WORDS);
-        LOG_INFO("  INS cmd task created (prio=1)\r\n");
     } else {
-        LOG_ERROR("[INIT] INS cmd task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "INS cmd task create failed!\r\n");
     }
 
     if (xTaskCreate(motion_task,
@@ -250,9 +245,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_MOTION,
                                    s_motionTaskHandle,
                                    MOTION_TASK_STACK_WORDS);
-        LOG_INFO("  Motion task created (prio=3)\r\n");
     } else {
-        LOG_ERROR("[INIT] motion task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "motion task create failed!\r\n");
     }
 
     if (xTaskCreate(nav_task,
@@ -264,9 +258,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_NAV,
                                    s_navTaskHandle,
                                    NAV_TASK_STACK_WORDS);
-        LOG_INFO("  NAV task created (prio=2)\r\n");
     } else {
-        LOG_ERROR("[INIT] nav task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "nav task create failed!\r\n");
     }
 
     if (xTaskCreate(path_task,
@@ -278,9 +271,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_PATH,
                                    s_pathTaskHandle,
                                    PATH_TASK_STACK_WORDS);
-        LOG_INFO("  PATH task created (prio=2)\r\n");
     } else {
-        LOG_ERROR("[INIT] path task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "path task create failed!\r\n");
     }
 
     if (xTaskCreate(gray_task,
@@ -292,9 +284,8 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_GRAY,
                                    s_grayTaskHandle,
                                    GRAY_TASK_STACK_WORDS);
-        LOG_INFO("  GRAY task created (prio=3)\r\n");
     } else {
-        LOG_ERROR("[INIT] gray task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "gray task create failed!\r\n");
     }
 
     if (xTaskCreate(grayline_task,
@@ -306,21 +297,19 @@ static void start_task(void *pvParameters)
         app_stack_monitor_set_task(APP_STACK_MON_GRAYLINE,
                                    s_grayLineTaskHandle,
                                    GRAYLINE_TASK_STACK_WORDS);
-        LOG_INFO("  GRAYLINE task created (prio=3)\r\n");
     } else {
-        LOG_ERROR("[INIT] grayline task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "grayline task create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE
     if (xTaskCreate(test1_task,
                     "test1",
                     TEST1_TASK_STACK_WORDS,
-                    NULL,
+                    NULL,¡¤
                     2,
                     &s_test1TaskHandle) == pdPASS) {
-        LOG_INFO("  TEST1 task created (prio=2)\r\n");
     } else {
-        LOG_ERROR("[INIT] test1 task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "test1 task create failed!\r\n");
     }
 #endif
 
@@ -328,19 +317,18 @@ static void start_task(void *pvParameters)
                     "flash_test",
                     FLASH_TASK_STACK_WORDS,
                     NULL,
-                    1,
+                    2,
                     &s_flashTaskHandle) == pdPASS) {
         app_stack_monitor_set_task(APP_STACK_MON_FLASH,
                                    s_flashTaskHandle,
                                    FLASH_TASK_STACK_WORDS);
-        LOG_INFO("  Flash test task created (prio=1)\r\n");
     } else {
-        LOG_ERROR("[INIT] flash test task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "flash test task create failed!\r\n");
     }
 
     app_stack_monitor_start();
 
-    LOG_INFO("====================================\r\n");
+    LOGI_INIT(LOG_MOD_SYS, "Worker tasks created\r\n");
 
     taskEXIT_CRITICAL();
 

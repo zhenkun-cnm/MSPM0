@@ -56,18 +56,121 @@ static bool str_prefix(const char *s, const char *prefix)
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
+static void log_print_help(void)
+{
+    /* One record: a busy-drop logger cannot reliably emit a help page line by line. */
+    LOGI_RELIABLE(LOG_MOD_CLI,
+         "log: status|level error|warn|info|debug|module <name|all> on|off|telemetry motion|grayline|off\r\n");
+}
+
+static void log_print_status(void)
+{
+    LOGI_RELIABLE(LOG_MOD_CLI, "level=%s modules=0x%08lX telemetry=%s dropped=%lu\r\n",
+          LOG_LevelName(LOG_GetLevel()),
+          (unsigned long)LOG_GetModuleMask(),
+          LOG_TelemetryName(LOG_GetTelemetry()),
+          (unsigned long)LOG_GetDroppedCount());
+}
+
+static bool log_parse_two_words(char *text, char **first, char **second)
+{
+    char *cursor = text;
+
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return false;
+    }
+    *first = cursor;
+    while (*cursor != '\0' && *cursor != ' ' && *cursor != '\t') {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return false;
+    }
+    *cursor++ = '\0';
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return false;
+    }
+    *second = cursor;
+    while (*cursor != '\0' && *cursor != ' ' && *cursor != '\t') {
+        cursor++;
+    }
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    return *cursor == '\0';
+}
+
+static bool handle_log_command(char *line)
+{
+    LOG_Level_t level;
+    LOG_Module_t module;
+    LOG_Telemetry_t telemetry;
+    char *name;
+    char *state;
+
+    if (str_eq(line, "log help")) {
+        log_print_help();
+    } else if (str_eq(line, "log status")) {
+        log_print_status();
+    } else if (str_prefix(line, "log level ")) {
+        name = line + strlen("log level ");
+        if (LOG_LevelFromName(name, &level)) {
+            LOG_SetLevel(level);
+            LOGI_RELIABLE(LOG_MOD_CLI, "level=%s\r\n", LOG_LevelName(level));
+        } else {
+            LOGI_RELIABLE(LOG_MOD_CLI, "usage: log level error|warn|info|debug\r\n");
+        }
+    } else if (str_prefix(line, "log module ") &&
+               log_parse_two_words(line + strlen("log module "), &name, &state)) {
+        if (strcmp(name, "all") == 0 && strcmp(state, "on") == 0) {
+            LOG_SetModuleMask(LOG_MOD_ALL);
+            LOGI_RELIABLE(LOG_MOD_CLI, "module all on\r\n");
+        } else if (strcmp(name, "all") == 0 && strcmp(state, "off") == 0) {
+            LOG_SetModuleMask(0U);
+            LOGI_RELIABLE(LOG_MOD_CLI, "module all off\r\n");
+        } else if (LOG_ModuleFromName(name, &module) &&
+                   (strcmp(state, "on") == 0 || strcmp(state, "off") == 0)) {
+            LOG_SetModuleEnabled(module, strcmp(state, "on") == 0);
+            LOGI_RELIABLE(LOG_MOD_CLI, "module %s %s\r\n", name, state);
+        } else {
+            LOGI_RELIABLE(LOG_MOD_CLI, "usage: log module <name>|all on|off\r\n");
+        }
+    } else if (str_prefix(line, "log telemetry ")) {
+        name = line + strlen("log telemetry ");
+        if (!LOG_TelemetryFromName(name, &telemetry)) {
+            LOGI_RELIABLE(LOG_MOD_CLI, "usage: log telemetry motion|grayline|off\r\n");
+        } else if (telemetry == LOG_TELEMETRY_OFF) {
+            LOG_SetTelemetry(telemetry);
+            LOGI_RELIABLE(LOG_MOD_CLI, "telemetry=off\r\n");
+        } else {
+            LOGI_RELIABLE(LOG_MOD_CLI, "telemetry=%s (text muted)\r\n",
+                 LOG_TelemetryName(telemetry));
+            LOG_SetTelemetry(telemetry);
+        }
+    } else {
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: log help\r\n");
+    }
+    return true;
+}
+
 static bool send_ins_cmd(INS_CommandType_t type)
 {
     INS_Command_t cmd;
     cmd.type = type;
 
     if (g_insCmdQueue == NULL) {
-        LOG_RAW("[INS_CMD] error: queue not ready\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_insCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[INS_CMD] error: queue full\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue full\r\n");
         return false;
     }
 
@@ -83,12 +186,12 @@ static bool send_motion_cmd2(Motion_CommandType_t type, float value, float value
     cmd.cmd_id = 0U;
 
     if (g_motionCmdQueue == NULL) {
-        LOG_RAW("[MOTION_CMD] error: queue not ready\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_motionCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[MOTION_CMD] error: queue full\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue full\r\n");
         return false;
     }
 
@@ -107,12 +210,12 @@ static bool send_nav_cmd(const Nav_Command_t *cmd)
     }
 
     if (g_navCmdQueue == NULL) {
-        LOG_RAW("[NAV_CMD] error: queue not ready\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_navCmdQueue, cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[NAV_CMD] error: queue full\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue full\r\n");
         return false;
     }
 
@@ -125,12 +228,12 @@ static bool send_path_cmd(Path_CommandType_t type)
     cmd.type = type;
 
     if (g_pathCmdQueue == NULL) {
-        LOG_RAW("[PATH] error: queue not ready\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_pathCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[PATH] error: queue full\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue full\r\n");
         return false;
     }
 
@@ -141,14 +244,15 @@ static bool send_grayline_cmd(GrayLine_CommandType_t type)
 {
     GrayLine_Command_t cmd;
     cmd.type = type;
+    cmd.rate_loop_enabled = false;
 
     if (g_grayLineCmdQueue == NULL) {
-        LOG_RAW("[GRAYLINE] error: queue not ready\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_grayLineCmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        LOG_RAW("[GRAYLINE] error: queue full\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: queue full\r\n");
         return false;
     }
 
@@ -160,7 +264,7 @@ static void speedtest_send_motor_cmd(MotorCmdType type, int16_t val)
     MotorCmd cmd;
 
     if (g_motorCmdQueue == NULL) {
-        LOG_RAW("[SPDTEST] error: motor queue not ready\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: motor queue not ready\r\n");
         return;
     }
 
@@ -208,12 +312,12 @@ static const char *speedtest_mode_name(SpeedTest_Mode_t mode)
 
 static void speedtest_print_help(void)
 {
-    LOG_RAW("[SPDTEST] commands:\r\n");
-    LOG_RAW("[SPDTEST]   speedtest start <pwm 0..100>\r\n");
-    LOG_RAW("[SPDTEST]   speedtest reverse <left_pwm 0..100> <right_pwm 0..100>\r\n");
-    LOG_RAW("[SPDTEST]   speedtest signed <left_pwm -100..100> <right_pwm -100..100>\r\n");
-    LOG_RAW("[SPDTEST]   speedtest stop\r\n");
-    LOG_RAW("[SPDTEST]   speedtest status\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "speedtest start <pwm 0..100>\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "speedtest reverse <left_pwm 0..100> <right_pwm 0..100>\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "speedtest signed <left_pwm -100..100> <right_pwm -100..100>\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "speedtest stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "speedtest status\r\n");
 }
 
 static void speedtest_start_regular(bool reverse, int16_t left_pwm, int16_t right_pwm)
@@ -230,7 +334,7 @@ static void speedtest_start_regular(bool reverse, int16_t left_pwm, int16_t righ
     speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, s_speedTest.left_pwm);
     speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, s_speedTest.right_pwm);
     speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 1);
-    LOG_RAW("[SPDTEST] start mode=%s pwm=%d/%d print=%ums\r\n",
+    LOGI_RELIABLE(LOG_MOD_CLI, "start mode=%s pwm=%d/%d print=%ums\r\n",
             speedtest_mode_name(s_speedTest.mode),
             (int)s_speedTest.left_pwm,
             (int)s_speedTest.right_pwm,
@@ -249,7 +353,7 @@ static void speedtest_start_signed(int16_t left_pwm, int16_t right_pwm)
     speedtest_send_motor_cmd(MOTOR_CMD_LEFT_SIGNED_SPEED, s_speedTest.left_pwm);
     speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SIGNED_SPEED, s_speedTest.right_pwm);
     speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 1);
-    LOG_RAW("[SPDTEST] start mode=%s pwm=%d/%d print=%ums\r\n",
+    LOGI_RELIABLE(LOG_MOD_CLI, "start mode=%s pwm=%d/%d print=%ums\r\n",
             speedtest_mode_name(s_speedTest.mode),
             (int)s_speedTest.left_pwm,
             (int)s_speedTest.right_pwm,
@@ -273,14 +377,14 @@ static void speedtest_stop(void)
     speedtest_send_motor_cmd(MOTOR_CMD_RIGHT_SIGNED_SPEED, 0);
     speedtest_send_motor_cmd(MOTOR_CMD_ONOFF, 0);
     memset(&s_speedTest, 0, sizeof(s_speedTest));
-    LOG_RAW("[SPDTEST] stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_CLI, "stop\r\n");
 }
 
 static void speedtest_print_status(void)
 {
     UBaseType_t stack_free_words = uxTaskGetStackHighWaterMark(NULL);
 
-    LOG_RAW("[SPDTEST] run=%u mode=%s pwm=%d/%d ref=%u stack_min_free=%lu words\r\n",
+    LOGI_RELIABLE(LOG_MOD_CLI, "run=%u mode=%s pwm=%d/%d ref=%u stack_min_free=%lu words\r\n",
             s_speedTest.running ? 1U : 0U,
             speedtest_mode_name(s_speedTest.mode),
             (int)s_speedTest.left_pwm,
@@ -313,7 +417,7 @@ static void speedtest_tick(void)
     s_speedTest.last_print_tick = now;
 
     if (!MotorEncoder_ReadSnapshot(&enc)) {
-        LOG_RAW("[SPDTEST] encoder snapshot failed\r\n");
+        LOGE(LOG_MOD_MOTOR, "encoder snapshot failed\r\n");
         return;
     }
 
@@ -322,7 +426,7 @@ static void speedtest_tick(void)
         s_speedTest.prev_right_total = enc.right_total_counts;
         s_speedTest.prev_seq = enc.seq;
         s_speedTest.ref_ready = true;
-        LOG_RAW("[SPDTEST] sync seq=%lu\r\n", (unsigned long)enc.seq);
+        LOGD(LOG_MOD_MOTOR, "sync seq=%lu\r\n", (unsigned long)enc.seq);
         return;
     }
 
@@ -340,7 +444,7 @@ static void speedtest_tick(void)
                  (int32_t)(((int64_t)right_mmps * 100LL) / (int64_t)left_mmps) :
                  0;
 
-    LOG_RAW("[SPDTEST] mode=%s pwm=%d/%d dt_ms=%lu lc=%ld rc=%ld lmmps=%ld rmmps=%ld ratio_x100=%ld\r\n",
+    LOGD(LOG_MOD_MOTOR, "mode=%s pwm=%d/%d dt_ms=%lu lc=%ld rc=%ld lmmps=%ld rmmps=%ld ratio_x100=%ld\r\n",
             speedtest_mode_name(s_speedTest.mode),
             (int)s_speedTest.left_pwm,
             (int)s_speedTest.right_pwm,
@@ -374,16 +478,16 @@ static bool send_test1_cmd(Test1_CommandType_t type)
     cmd.type = type;
 
     if (g_test1CmdQueue == NULL) {
-        log_printf_internal("[TEST1_CMD] error: queue not ready\r\n");
+        LOGD(LOG_MOD_CLI, "error: queue not ready\r\n");
         return false;
     }
 
     if (xQueueSend(g_test1CmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) {
-        log_printf_internal("[TEST1_CMD] error: queue full\r\n");
+        LOGD(LOG_MOD_CLI, "error: queue full\r\n");
         return false;
     }
 
-    log_printf_internal("[TEST1_CMD] queued %s\r\n", test1_cmd_name(type));
+    LOGD(LOG_MOD_CLI, "queued %s\r\n", test1_cmd_name(type));
     return true;
 }
 #endif
@@ -507,7 +611,9 @@ static void parse_line(char *line)
         line++;
     }
 
-    if (str_eq(line, "ins help") || str_eq(line, "help")) {
+    if (str_prefix(line, "log")) {
+        (void)handle_log_command(line);
+    } else if (str_eq(line, "ins help") || str_eq(line, "help")) {
         (void)send_ins_cmd(INS_CMD_HELP);
     } else if (str_eq(line, "ins status")) {
         (void)send_ins_cmd(INS_CMD_STATUS);
@@ -531,25 +637,25 @@ static void parse_line(char *line)
         if (parse_float_arg(line + strlen("motion fwd "), &value)) {
             (void)send_motion_cmd(MOTION_CMD_FWD, value);
         } else {
-            LOG_RAW("[MOTION_CMD] error: usage motion fwd <meters>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage motion fwd <meters>\r\n");
         }
     } else if (str_prefix(line, "motion back ")) {
         if (parse_float_arg(line + strlen("motion back "), &value)) {
             (void)send_motion_cmd(MOTION_CMD_BACK, value);
         } else {
-            LOG_RAW("[MOTION_CMD] error: usage motion back <meters>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage motion back <meters>\r\n");
         }
     } else if (str_prefix(line, "motion turn ")) {
         if (parse_float_arg(line + strlen("motion turn "), &value)) {
             (void)send_motion_cmd(MOTION_CMD_TURN, value);
         } else {
-            LOG_RAW("[MOTION_CMD] error: usage motion turn <-180..180>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage motion turn <-180..180>\r\n");
         }
     } else if (str_prefix(line, "motion arc ")) {
         if (parse_two_float_args(line + strlen("motion arc "), &value, &value2)) {
             (void)send_motion_cmd2(MOTION_CMD_ARC, value, value2);
         } else {
-            LOG_RAW("[MOTION_CMD] error: usage motion arc <radius_m> <-180..180_deg>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage motion arc <radius_m> <-180..180_deg>\r\n");
         }
     } else if (str_eq(line, "nav help")) {
         memset(&navCmd, 0, sizeof(navCmd));
@@ -572,7 +678,7 @@ static void parse_line(char *line)
             navCmd.yaw_deg = yaw_deg;
             (void)send_nav_cmd(&navCmd);
         } else {
-            LOG_RAW("[NAV_CMD] error: usage nav goto <x_m> <y_m> <yaw_deg>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage nav goto <x_m> <y_m> <yaw_deg>\r\n");
         }
     } else if (str_prefix(line, "nav square ")) {
         if (parse_float_arg(line + strlen("nav square "), &value)) {
@@ -581,7 +687,7 @@ static void parse_line(char *line)
             navCmd.side_m = value;
             (void)send_nav_cmd(&navCmd);
         } else {
-            LOG_RAW("[NAV_CMD] error: usage nav square <side_m>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage nav square <side_m>\r\n");
         }
     } else if (str_eq(line, "path help")) {
         (void)send_path_cmd(PATH_CMD_HELP);
@@ -609,10 +715,10 @@ static void parse_line(char *line)
         Gray_PrintStatus();
     } else if (str_eq(line, "gray polarity high")) {
         Gray_SetPolarity(GRAY_POLARITY_ACTIVE_HIGH);
-        LOG_RAW("[GRAY] polarity=HIGH\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "polarity=HIGH\r\n");
     } else if (str_eq(line, "gray polarity low")) {
         Gray_SetPolarity(GRAY_POLARITY_ACTIVE_LOW);
-        LOG_RAW("[GRAY] polarity=LOW\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "polarity=LOW\r\n");
     } else if (str_eq(line, "grayline help")) {
         (void)send_grayline_cmd(GRAYLINE_CMD_HELP);
     } else if (str_eq(line, "grayline status")) {
@@ -635,7 +741,7 @@ static void parse_line(char *line)
             right_pwm >= 0L && right_pwm <= 100L) {
             speedtest_start_regular(true, (int16_t)left_pwm, (int16_t)right_pwm);
         } else {
-            LOG_RAW("[SPDTEST] error: usage speedtest reverse <left_pwm 0..100> <right_pwm 0..100>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage speedtest reverse <left_pwm 0..100> <right_pwm 0..100>\r\n");
         }
     } else if (str_prefix(line, "speedtest signed ")) {
         if (parse_two_long_args(line + strlen("speedtest signed "), &left_pwm, &right_pwm) &&
@@ -643,7 +749,7 @@ static void parse_line(char *line)
             right_pwm >= -100L && right_pwm <= 100L) {
             speedtest_start_signed((int16_t)left_pwm, (int16_t)right_pwm);
         } else {
-            LOG_RAW("[SPDTEST] error: usage speedtest signed <left_pwm -100..100> <right_pwm -100..100>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage speedtest signed <left_pwm -100..100> <right_pwm -100..100>\r\n");
         }
     } else if (str_prefix(line, "speedtest start ")) {
         char *end = NULL;
@@ -651,7 +757,7 @@ static void parse_line(char *line)
         if (end != (line + strlen("speedtest start "))) {
             speedtest_start((int16_t)pwm);
         } else {
-            LOG_RAW("[SPDTEST] error: usage speedtest start <pwm 0..100>\r\n");
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: usage speedtest start <pwm 0..100>\r\n");
         }
 #if APP_TEST1_ENABLE
     } else if (str_eq(line, "test1 help")) {
@@ -664,32 +770,32 @@ static void parse_line(char *line)
         (void)send_test1_cmd(TEST1_CMD_STOP);
 #else
     } else if (str_prefix(line, "test1") || str_eq(line, "Test1")) {
-        LOG_RAW("[TEST1] disabled: set APP_TEST1_ENABLE=1\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "disabled: set APP_TEST1_ENABLE=1\r\n");
 #endif
     } else if (str_prefix(line, "motion")) {
-        LOG_RAW("[MOTION_CMD] unknown: %s\r\n", line);
-        LOG_RAW("[MOTION_CMD] try: motion help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: motion help\r\n");
     } else if (str_prefix(line, "nav")) {
-        LOG_RAW("[NAV_CMD] unknown: %s\r\n", line);
-        LOG_RAW("[NAV_CMD] try: nav help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: nav help\r\n");
     } else if (str_prefix(line, "path")) {
-        LOG_RAW("[PATH] unknown: %s\r\n", line);
-        LOG_RAW("[PATH] try: path help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: path help\r\n");
     } else if (str_prefix(line, "grayline")) {
-        LOG_RAW("[GRAYLINE] unknown: %s\r\n", line);
-        LOG_RAW("[GRAYLINE] try: grayline help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: grayline help\r\n");
     } else if (str_prefix(line, "gray")) {
-        LOG_RAW("[GRAY] unknown: %s\r\n", line);
-        LOG_RAW("[GRAY] try: gray help or grayline help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: gray help or grayline help\r\n");
     } else if (str_prefix(line, "speedtest")) {
-        LOG_RAW("[SPDTEST] unknown: %s\r\n", line);
-        LOG_RAW("[SPDTEST] try: speedtest help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: speedtest help\r\n");
     } else if (str_prefix(line, "test1")) {
-        LOG_RAW("[TEST1] unknown: %s\r\n", line);
-        LOG_RAW("[TEST1] try: test1 help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: test1 help\r\n");
     } else if (line[0] != '\0') {
-        LOG_RAW("[INS_CMD] unknown: %s\r\n", line);
-        LOG_RAW("[INS_CMD] try: ins help, motion help, nav help, path help, gray help, grayline help, or test1 help\r\n");
+        LOGI_RELIABLE(LOG_MOD_CLI, "unknown: %s\r\n", line);
+        LOGI_RELIABLE(LOG_MOD_CLI, "try: ins help, motion help, nav help, path help, gray help, grayline help, or test1 help\r\n");
     }
 }
 
@@ -703,13 +809,13 @@ void ins_cmd_task(void *pvParameters)
     (void)pvParameters;
 
     if (uart == NULL) {
-        LOG_ERROR("[INS_CMD] UART RX handle NULL\r\n");
+        LOGE(LOG_MOD_CLI, "UART RX handle NULL\r\n");
         vTaskDelete(NULL);
         return;
     }
 
     uart->init(uart);
-    LOG_INFO("[INS_CMD] UART commands ready: ins help / motion help / nav help / path help / gray help / grayline help / speedtest help / test1 help\r\n");
+    LOGI_INIT(LOG_MOD_CLI, "UART commands ready: ins help / motion help / nav help / path help / gray help / grayline help / speedtest help / test1 help\r\n");
 
     while (1) {
         uint8_t ch;
@@ -730,7 +836,7 @@ void ins_cmd_task(void *pvParameters)
                     line[len++] = (char)ch;
                 } else {
                     len = 0;
-                    LOG_RAW("[INS_CMD] error: line too long\r\n");
+                    LOGI_RELIABLE(LOG_MOD_CLI, "error: line too long\r\n");
                 }
             }
         }

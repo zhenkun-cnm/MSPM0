@@ -22,7 +22,7 @@ UV4 runs asynchronously and returns its result via the exit code; **read `build.
 
 - **Toolchain / SDK paths** (hard-coded in `c_cpp_properties.json` and the `.uvprojx`): Keil at `D:\Keil\V5.4`, MSPM0 SDK at `c:\ti\mspm0_sdk_2_10_00_04`.
 - **Adding a new source file requires editing the `.uvprojx`** (add the `<File>` entry to the right group) — the IntelliSense `c_cpp_properties.json` does NOT control what Keil compiles. New `app_*.c` / `port_*.c` / `dev_*.c` files will be silently excluded from the build until registered in the project.
-- **Device config (clocks/GPIO/peripherals) is generated from `empty.syscfg`** via SysConfig into `ti_msp_dl_config.c/h`. Do not hand-edit the generated files; change pin/peripheral assignments in `.syscfg` and regenerate. `empty.c` is the SDK entry stub holding `main()`.
+- **Device config (clocks/GPIO/peripherals) is generated from `empty.syscfg`** via SysConfig into `ti_msp_dl_config.c/h`. Direct edits to the generated files are allowed only as a controlled, temporary implementation aid: make the identical change in the graphical SysConfig editor, save and regenerate, then verify the generated output retains it. `empty.syscfg` remains authoritative; do not retain generated-file-only changes. `empty.c` is the SDK entry stub holding `main()`.
 
 There are no unit tests — verification is on-target (flash + observe UART log over the debug serial port).
 

@@ -226,6 +226,9 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 /* Defines for DMA_CH1 */
 #define DMA_CH1_CHAN_ID                                                      (0)
 #define DMA_CH1_TRIGGER_SEL_FSUB_1                       (DMA_GENERIC_SUB1_TRIG)
+/* Defines for DMA_CH2 */
+#define DMA_CH2_CHAN_ID                                                      (2)
+#define sys_uart_INST_DMA_TRIGGER                            (DMA_UART0_TX_TRIG)
 
 
 /* Port definition for Pin Group LED */

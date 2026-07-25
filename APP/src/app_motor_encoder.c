@@ -144,7 +144,7 @@ void motor_encoder_task(void *pvParameters)
             printCnt = 0;
 
             if (PORT_MOTOR_ENCODER2_GetDiag(&enc2Diag)) {
-                //LOG_RAW("ENC t=%lu Ld=%+ld Rd=%+ld Lt=%+ld Rt=%+ld Ao=%lu Bo=%lu AB=%u Ac=%u Bc=%u Eq=%u bad=%lu ov=%lu\r\n",
+                //LOGI(LOG_MOD_MOTOR, "ENC t=%lu Ld=%+ld Rd=%+ld Lt=%+ld Rt=%+ld Ao=%lu Bo=%lu AB=%u Ac=%u Bc=%u Eq=%u bad=%lu ov=%lu\r\n",
 //                    (unsigned long) s_motorSnapshot.tick,
 //                    (long) s_motorSnapshot.left_delta_counts,
 //                    (long) s_motorSnapshot.right_delta_counts,

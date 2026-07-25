@@ -17,6 +17,29 @@
 
 INS_PoseGlobal_t g_insPoseGlobal = {{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U}, NULL};
 QueueHandle_t g_insCmdQueue = NULL;
+static INS_ControlStatus_t s_insControlStatus = {
+    INS_CMD_STATUS, INS_CONTROL_RESULT_NONE, 0U
+};
+
+static void ins_control_publish(INS_CommandType_t command,
+                                INS_ControlResult_t result)
+{
+    taskENTER_CRITICAL();
+    s_insControlStatus.last_command = command;
+    s_insControlStatus.result = result;
+    s_insControlStatus.sequence++;
+    taskEXIT_CRITICAL();
+}
+
+bool INS_ControlStatus_Read(INS_ControlStatus_t *out)
+{
+    if (out == NULL) return false;
+
+    taskENTER_CRITICAL();
+    *out = s_insControlStatus;
+    taskEXIT_CRITICAL();
+    return true;
+}
 
 /**
   * @brief  读取 INS 位姿数据（线程安全，带互斥锁保护）
@@ -45,7 +68,6 @@ void INS_Pose_Write(const INS_Pose_t *in)
 
 #define INS_TASK_PERIOD_MS             10U
 #define INS_PRINT_PERIOD_MS            100U
-#define INS_WAIT_PRINT_PERIOD_MS       1000U
 #define INS_FLASH_LOG_PERIOD_MS        200U
 
 #define INS_WHEEL_DIAMETER_M           0.048f
@@ -140,14 +162,14 @@ static bool flash_log_probe(INS_FlashLog_t *log)
     }
 
     if (log->flash == NULL) {
-        LOG_RAW("[INS_CMD] error: flash handle NULL\r\n");
+        LOGE(LOG_MOD_INS, "error: flash handle NULL\r\n");
         return false;
     }
 
     log->flash->init(log->flash);
     if (!log->flash->readJEDECID(log->flash, &id) ||
         id.manufacturer != 0xEF || id.memoryType != 0x40) {
-        LOG_RAW("[INS_CMD] error: flash JEDEC invalid\r\n");
+        LOGE(LOG_MOD_INS, "error: flash JEDEC invalid\r\n");
         return false;
     }
 
@@ -170,7 +192,7 @@ static bool flash_log_init(INS_FlashLog_t *log)
     for (uint32_t i = 0; i < INS_FLASH_LOG_SECTOR_COUNT; i++) {
         if (!log->flash->sectorErase(log->flash,
             INS_FLASH_LOG_START_ADDR + (i * INS_FLASH_LOG_SECTOR_SIZE))) {
-            LOG_RAW("[INS_CMD] error: flash erase failed at sector %lu\r\n",
+            LOGE(LOG_MOD_INS, "error: flash erase failed at sector %lu\r\n",
                     (unsigned long)i);
             return false;
         }
@@ -178,7 +200,7 @@ static bool flash_log_init(INS_FlashLog_t *log)
 
     log->ready = true;
     log->enabled = true;
-    LOG_RAW("[INS_CMD] log on ok start=0x%08lX bytes=%lu\r\n",
+    LOGI(LOG_MOD_INS, "log on ok start=0x%08lX bytes=%lu\r\n",
             (unsigned long)INS_FLASH_LOG_START_ADDR,
             (unsigned long)INS_FLASH_LOG_BYTES);
     return true;
@@ -193,7 +215,7 @@ static void flash_log_print(INS_FlashLog_t *log)
         return;
     }
 
-    LOG_RAW("[INS_LOG] begin start=0x%08lX max=%lu\r\n",
+    LOGI(LOG_MOD_INS, "begin start=0x%08lX max=%lu\r\n",
             (unsigned long)INS_FLASH_LOG_START_ADDR,
             (unsigned long)INS_FLASH_RECORD_COUNT);
 
@@ -203,7 +225,7 @@ static void flash_log_print(INS_FlashLog_t *log)
 
         if (!log->flash->read(log->flash, addr,
                               (uint8_t *)&rec, sizeof(rec))) {
-            LOG_RAW("[INS_LOG] read error index=%lu addr=0x%08lX\r\n",
+            LOGI(LOG_MOD_INS, "read error index=%lu addr=0x%08lX\r\n",
                     (unsigned long)i, (unsigned long)addr);
             break;
         }
@@ -212,7 +234,7 @@ static void flash_log_print(INS_FlashLog_t *log)
             break;
         }
 
-        LOG_RAW("[INS_LOG] #%04lu boot_ms=%lu X=%+.3f Y=%+.3f YAW=%+.2f V=%+.3f W=%+.2f Ld=%d Rd=%d SRC=%c F=%u\r\n",
+        LOGI(LOG_MOD_INS, "#%04lu boot_ms=%lu X=%+.3f Y=%+.3f YAW=%+.2f V=%+.3f W=%+.2f Ld=%d Rd=%d SRC=%c F=%u\r\n",
                 (unsigned long)rec.seq,
                 (unsigned long)rec.tick_ms,
                 (double)rec.x_mm / 1000.0,
@@ -228,10 +250,10 @@ static void flash_log_print(INS_FlashLog_t *log)
     }
 
     if (printed == 0U) {
-        LOG_RAW("[INS_LOG] empty\r\n");
+        LOGI(LOG_MOD_INS, "empty\r\n");
     }
 
-    LOG_RAW("[INS_LOG] end count=%lu\r\n", (unsigned long)printed);
+    LOGI(LOG_MOD_INS, "end count=%lu\r\n", (unsigned long)printed);
 }
 
 static void flash_log_write(INS_FlashLog_t *log,
@@ -250,7 +272,7 @@ static void flash_log_write(INS_FlashLog_t *log,
         (INS_FLASH_LOG_START_ADDR + INS_FLASH_LOG_BYTES)) {
         log->full = true;
         log->enabled = false;
-        LOG_INFO("[INS] Flash log full\r\n");
+        LOGI(LOG_MOD_INS, "Flash log full\r\n");
         return;
     }
 
@@ -274,14 +296,14 @@ static void flash_log_write(INS_FlashLog_t *log,
 
 static void print_help(void)
 {
-    LOG_RAW("[INS_CMD] commands:\r\n");
-    LOG_RAW("[INS_CMD]   ins help\r\n");
-    LOG_RAW("[INS_CMD]   ins status\r\n");
-    LOG_RAW("[INS_CMD]   ins reset\r\n");
-    LOG_RAW("[INS_CMD]   ins log on\r\n");
-    LOG_RAW("[INS_CMD]   ins log off\r\n");
-    LOG_RAW("[INS_CMD]   ins log print\r\n");
-    LOG_RAW("[INS_CMD]   ins flip\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins help\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins status\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins reset\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins log on\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins log off\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins log print\r\n");
+    LOGI_RELIABLE(LOG_MOD_INS, "ins flip\r\n");
 }
 
 static void print_status(const INS_Pose_t *pose,
@@ -289,7 +311,7 @@ static void print_status(const INS_Pose_t *pose,
                          const INS_FlashLog_t *log,
                          char yawSource)
 {
-    LOG_RAW("[INS_CMD] status ready=%u log=%u flash=%u full=%u seq=%lu addr=0x%08lX src=%c\r\n",
+    LOGI_RELIABLE(LOG_MOD_INS, "status ready=%u log=%u flash=%u full=%u seq=%lu addr=0x%08lX src=%c\r\n",
             ready ? 1U : 0U,
             log->enabled ? 1U : 0U,
             log->ready ? 1U : 0U,
@@ -297,7 +319,7 @@ static void print_status(const INS_Pose_t *pose,
             (unsigned long)log->seq,
             (unsigned long)log->nextAddr,
             yawSource);
-    LOG_RAW("[INS_CMD] pose X=%+.3f Y=%+.3f YAW=%+.2f V=%+.3f W=%+.2f L=%+.3f R=%+.3f F=%lu\r\n",
+    LOGI_RELIABLE(LOG_MOD_INS, "pose X=%+.3f Y=%+.3f YAW=%+.2f V=%+.3f W=%+.2f L=%+.3f R=%+.3f F=%lu\r\n",
             pose->x_m, pose->y_m, pose->yaw_deg,
             pose->v_mps, pose->w_dps,
             pose->left_m, pose->right_m,
@@ -338,7 +360,8 @@ static void handle_commands(INS_Pose_t *pose,
 
             case INS_CMD_RESET:
                 if (!ready || !latestRawYawValid) {
-                    LOG_RAW("[INS_CMD] error: not ready\r\n");
+                    LOGE(LOG_MOD_INS, "error: not ready\r\n");
+                    ins_control_publish(INS_CMD_RESET, INS_CONTROL_RESULT_ERROR);
                     break;
                 }
                 *yawZero = latestRawYaw;
@@ -367,19 +390,20 @@ static void handle_commands(INS_Pose_t *pose,
                     }
                 }
                 update_flags(pose, true, true, log);
-                LOG_RAW("[INS_CMD] reset ok\r\n");
+                LOGI(LOG_MOD_INS, "reset ok\r\n");
+                ins_control_publish(INS_CMD_RESET, INS_CONTROL_RESULT_OK);
                 break;
 
             case INS_CMD_LOG_ON:
                 if (!ready) {
-                    LOG_RAW("[INS_CMD] error: not ready\r\n");
+                    LOGE(LOG_MOD_INS, "error: not ready\r\n");
                     break;
                 }
                 if (log->ready && !log->full) {
                     log->enabled = true;
-                    LOG_RAW("[INS_CMD] log on ok\r\n");
+                    LOGI(LOG_MOD_INS, "log on ok\r\n");
                 } else if (log->full) {
-                    LOG_RAW("[INS_CMD] error: flash full\r\n");
+                    LOGE(LOG_MOD_INS, "error: flash full\r\n");
                 } else {
                     (void)flash_log_init(log);
                 }
@@ -389,7 +413,7 @@ static void handle_commands(INS_Pose_t *pose,
             case INS_CMD_LOG_OFF:
                 log->enabled = false;
                 update_flags(pose, imuValid, *yawZeroReady, log);
-                LOG_RAW("[INS_CMD] log off ok\r\n");
+                LOGI(LOG_MOD_INS, "log off ok\r\n");
                 break;
 
             case INS_CMD_LOG_PRINT:
@@ -408,12 +432,13 @@ static void handle_commands(INS_Pose_t *pose,
                 *logAccumLeft = 0;
                 *logAccumRight = 0;
                 *odomRefReady = false;
-                LOG_RAW("[INS_CMD] m2 flip ok\r\n");
+                LOGI(LOG_MOD_INS, "m2 flip ok\r\n");
                 update_flags(pose, imuValid, *yawZeroReady, log);
+                ins_control_publish(INS_CMD_FLIP, INS_CONTROL_RESULT_OK);
                 break;
 
             default:
-                LOG_RAW("[INS_CMD] error: unknown command\r\n");
+                LOGE(LOG_MOD_INS, "error: unknown command\r\n");
                 break;
         }
     }
@@ -425,7 +450,6 @@ void ins_task(void *pvParameters)
     INS_FlashLog_t flashLog = {0};
     TickType_t lastWake = xTaskGetTickCount();
     TickType_t lastPrint = lastWake;
-    TickType_t lastWaitPrint = lastWake;
     TickType_t lastFlash = lastWake;
     bool yawZeroReady = false;
     bool havePrevYaw = false;
@@ -444,8 +468,6 @@ void ins_task(void *pvParameters)
     char yawSource = 'W';
 
     (void)pvParameters;
-
-    LOG_INFO("[INS] Init: wheel=48mm base=125mm M1L=1054 M2R=1054\r\n");
 
     while (1) {
         MotorEncoderSnapshot_t odom;
@@ -483,12 +505,8 @@ void ins_task(void *pvParameters)
                 insReady = true;
                 lastPrint = xTaskGetTickCount();
                 lastFlash = lastPrint;
-                LOG_INFO("[INS] Ready: yaw zero=%+.2f src=%c\r\n",
+                LOGI_INIT(LOG_MOD_INS, "Ready: yaw zero=%+.2f src=%c\r\n",
                          yawZero, imu.yawSource);
-            } else if ((xTaskGetTickCount() - lastWaitPrint) >=
-                       pdMS_TO_TICKS(INS_WAIT_PRINT_PERIOD_MS)) {
-                lastWaitPrint = xTaskGetTickCount();
-                LOG_INFO("[INS] Waiting for IMU yaw before pose output\r\n");
             }
 
             handle_commands(&pose, &flashLog, insReady, imuValid,
@@ -580,13 +598,11 @@ void ins_task(void *pvParameters)
 
         if ((xTaskGetTickCount() - lastPrint) >= pdMS_TO_TICKS(INS_PRINT_PERIOD_MS)) {
             lastPrint = xTaskGetTickCount();
-#if LOG_PRINT_INS_ENABLE
-            LOG_RAW("[INS] X:%+.3f Y:%+.3f YAW:%+.2f V:%+.3f W:%+.2f L:%+.3f R:%+.3f SRC:%c F:%lu\r\n",
+            LOGD(LOG_MOD_INS, "X:%+.3f Y:%+.3f YAW:%+.2f V:%+.3f W:%+.2f L:%+.3f R:%+.3f SRC:%c F:%lu\r\n",
                     pose.x_m, pose.y_m, pose.yaw_deg,
                     pose.v_mps, pose.w_dps,
                     pose.left_m, pose.right_m,
                     yawSource, (unsigned long)pose.flags);
-#endif
         }
 
         if ((xTaskGetTickCount() - lastFlash) >= pdMS_TO_TICKS(INS_FLASH_LOG_PERIOD_MS)) {

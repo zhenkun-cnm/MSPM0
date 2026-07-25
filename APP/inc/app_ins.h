@@ -39,6 +39,18 @@ typedef struct {
     INS_CommandType_t type;
 } INS_Command_t;
 
+typedef enum {
+    INS_CONTROL_RESULT_NONE = 0,
+    INS_CONTROL_RESULT_OK,
+    INS_CONTROL_RESULT_ERROR
+} INS_ControlResult_t;
+
+typedef struct {
+    INS_CommandType_t     last_command;
+    INS_ControlResult_t   result;
+    uint32_t              sequence;
+} INS_ControlStatus_t;
+
 typedef struct {
     float x_m;                  /**< INS 估计的 X 坐标，单位 m */
     float y_m;                  /**< INS 估计的 Y 坐标，单位 m */
@@ -60,6 +72,7 @@ extern QueueHandle_t g_insCmdQueue;
 
 bool INS_Pose_Read(INS_Pose_t *out);
 void INS_Pose_Write(const INS_Pose_t *in);
+bool INS_ControlStatus_Read(INS_ControlStatus_t *out);
 
 void ins_task(void *pvParameters);
 

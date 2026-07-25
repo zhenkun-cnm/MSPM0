@@ -24,10 +24,10 @@ void PORT_IMU_Init(void);
 bool PORT_IMU_IsOk(void);
 
 /* 读取加速度计原始数据 (X, Y, Z) — 量程 ±16g */
-void PORT_IMU_ReadAccelRaw(int16_t *ax, int16_t *ay, int16_t *az);
+bool PORT_IMU_ReadAccelRaw(int16_t *ax, int16_t *ay, int16_t *az);
 
 /* 读取陀螺仪原始数据 (X, Y, Z) — 量程 ±2000°/s */
-void PORT_IMU_ReadGyroRaw(int16_t *gx, int16_t *gy, int16_t *gz);
+bool PORT_IMU_ReadGyroRaw(int16_t *gx, int16_t *gy, int16_t *gz);
 
 #ifdef __cplusplus
 }

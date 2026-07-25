@@ -6,6 +6,7 @@
 #include "port_log.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -23,27 +24,33 @@ static const char *gray_polarity_name(Gray_Polarity_t polarity)
 
 static void gray_print_scan_line(const Gray_Snapshot_t *snap)
 {
+    char active_channels[24];
+    uint32_t used = 0U;
     bool any = false;
 
     if (snap == NULL) {
         return;
     }
 
-    LOG_RAW("[GRAY] seq=%lu active_ch=",
-            (unsigned long)snap->seq);
-
     for (uint8_t i = 0U; i < GRAY_CHANNEL_COUNT; i++) {
         if (snap->active[i]) {
-            LOG_RAW("%s%u", any ? "," : "", (unsigned)(i + 1U));
+            int written = snprintf(&active_channels[used],
+                                   sizeof(active_channels) - used,
+                                   "%s%u", any ? "," : "", (unsigned)(i + 1U));
+            if (written > 0 && (uint32_t)written < (sizeof(active_channels) - used)) {
+                used += (uint32_t)written;
+            }
             any = true;
         }
     }
 
     if (!any) {
-        LOG_RAW("none");
+        (void)snprintf(active_channels, sizeof(active_channels), "none");
     }
 
-    LOG_RAW(" raw=0x%02X active=0x%02X\r\n",
+    LOGI(LOG_MOD_GRAY, "seq=%lu active_ch=%s raw=0x%02X active=0x%02X\r\n",
+            (unsigned long)snap->seq,
+            active_channels,
             (unsigned)snap->raw_mask,
             (unsigned)snap->active_mask);
 }
@@ -86,10 +93,10 @@ Gray_Polarity_t Gray_GetPolarity(void)
 
 void Gray_PrintHelp(void)
 {
-    LOG_RAW("[GRAY] commands:\r\n");
-    LOG_RAW("[GRAY]   gray status\r\n");
-    LOG_RAW("[GRAY]   gray polarity high\r\n");
-    LOG_RAW("[GRAY]   gray polarity low\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAY, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAY, "gray status\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAY, "gray polarity high\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAY, "gray polarity low\r\n");
 }
 
 void Gray_PrintStatus(void)
@@ -97,18 +104,18 @@ void Gray_PrintStatus(void)
     Gray_Snapshot_t snap;
 
     if (!Gray_ReadSnapshot(&snap)) {
-        LOG_RAW("[GRAY] status: no sample yet polarity=%s\r\n",
+        LOGI_RELIABLE(LOG_MOD_GRAY, "status: no sample yet polarity=%s\r\n",
                 gray_polarity_name(Gray_GetPolarity()));
         return;
     }
 
-    LOG_RAW("[GRAY] seq=%lu tick=%lu polarity=%s raw=0x%02X active=0x%02X\r\n",
+    LOGI_RELIABLE(LOG_MOD_GRAY, "seq=%lu tick=%lu polarity=%s raw=0x%02X active=0x%02X\r\n",
             (unsigned long)snap.seq,
             (unsigned long)snap.tick,
             gray_polarity_name(snap.polarity),
             (unsigned)snap.raw_mask,
             (unsigned)snap.active_mask);
-    LOG_RAW("[GRAY] raw ch1..8=%u%u%u%u%u%u%u%u active ch1..8=%u%u%u%u%u%u%u%u\r\n",
+    LOGI_RELIABLE(LOG_MOD_GRAY, "raw ch1..8=%u%u%u%u%u%u%u%u active ch1..8=%u%u%u%u%u%u%u%u\r\n",
             snap.raw[0] ? 1U : 0U,
             snap.raw[1] ? 1U : 0U,
             snap.raw[2] ? 1U : 0U,
@@ -139,16 +146,12 @@ void gray_task(void *pvParameters)
 
     s_grayDev = GetGray();
     if (s_grayDev == NULL) {
-        LOG_ERROR("[GRAY] device handle NULL\r\n");
+        LOGE(LOG_MOD_GRAY, "device handle NULL\r\n");
         vTaskDelete(NULL);
         return;
     }
 
     s_grayDev->init(s_grayDev);
-    LOG_INFO("[GRAY] task started, period=%lums polarity=%s\r\n",
-             (unsigned long)GRAY_TASK_PERIOD_MS,
-             gray_polarity_name(s_grayDev->getPolarity(s_grayDev)));
-
     while (1) {
         Gray_Snapshot_t next;
 

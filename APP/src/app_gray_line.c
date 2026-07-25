@@ -4,6 +4,7 @@
  */
 #include "app_gray_line.h"
 #include "app_gray.h"
+#include "app_imu.h"
 #include "app_motor_encoder.h"
 #include "app_motion.h"
 #include "app_tb6612.h"
@@ -17,10 +18,17 @@
 #include <string.h>
 
 #define GRAYLINE_TASK_PERIOD_MS      10U
+#define GRAYLINE_TELEMETRY_DIVIDER   2U
 #define GRAYLINE_TARGET_POS          0.0f
 #define GRAYLINE_WHEEL_CIRCUM_M      (3.14159265358979323846f * 0.048f)
+#define GRAYLINE_WHEEL_BASE_M        0.125f
+#define GRAYLINE_RAD_TO_DEG          57.2957795130823208768f
+#define GRAYLINE_GYRO_Z_SIGN         1.0f
+#define GRAYLINE_RATE_LP_ALPHA       0.35f
 #define GRAYLINE_SPEED_I_LIMIT       0.40f
 #define GRAYLINE_POS_I_LIMIT         20.0f
+#define GRAYLINE_RATE_I_LIMIT        400.0f
+#define GRAYLINE_MAX_WHEEL_SPEED_MPS 0.80f
 #define GRAYLINE_BASE_PWM_AT_0P12MPS 25.0f
 #define GRAYLINE_REF_MPS             0.12f
 
@@ -30,20 +38,32 @@ GrayLine_PidConfig_t g_grayLinePid = {
     0.0f,
     0.001f,
     0.20f,
-    0.14f,
+    0.08f,
     300.0f,
     4.0f,
-    0.06f
+    0.06f,
+    0.0008f,
+    0.0f,
+    0.0f,
+    180.0f,
+    0.060f
 };
 
 static GrayLine_Status_t s_grayLineStatus = {0};
 
 typedef struct {
     bool running;
+    bool rate_loop_enabled;
     bool last_line_valid;
     bool speed_ref_ready;
     float pos_i;
     float pos_prev_error;
+    float rate_i;
+    float rate_prev_error;
+    float target_rate_dps;
+    float actual_rate_dps;
+    bool rate_filter_ready;
+    uint8_t telemetry_divider;
     float left_speed_i;
     float right_speed_i;
     float left_speed_prev_error;
@@ -95,6 +115,72 @@ static float slew_f32(float current, float target, float max_step)
         return current - max_step;
     }
     return target;
+}
+
+static float grayline_lowpass(float input, float previous, float alpha)
+{
+    return previous + (alpha * (input - previous));
+}
+
+static float grayline_turn_to_rate_dps(float turn_mps)
+{
+    return (2.0f * turn_mps * GRAYLINE_RAD_TO_DEG) / GRAYLINE_WHEEL_BASE_M;
+}
+
+static bool grayline_read_yaw_rate_dps(float *rate_dps)
+{
+    IMU_Data_t imu;
+
+    if (rate_dps == NULL || !IMU_Data_Read(&imu) || !imu.gyro_z_valid) {
+        return false;
+    }
+
+    *rate_dps = imu.gyro_z_dps * GRAYLINE_GYRO_Z_SIGN;
+    return true;
+}
+
+static float grayline_rate_pid_step(GrayLine_Runtime_t *rt,
+                                    float target_rate_dps,
+                                    float actual_rate_dps,
+                                    float dt,
+                                    float *error_out)
+{
+    float error;
+    float candidate_i;
+    float d = 0.0f;
+    float unsat;
+    float trim;
+
+    if (rt == NULL || dt <= 0.0f) {
+        if (error_out != NULL) {
+            *error_out = 0.0f;
+        }
+        return 0.0f;
+    }
+
+    error = target_rate_dps - actual_rate_dps;
+    candidate_i = clamp_f32(rt->rate_i + (error * dt),
+                            -GRAYLINE_RATE_I_LIMIT,
+                            GRAYLINE_RATE_I_LIMIT);
+    d = (error - rt->rate_prev_error) / dt;
+    unsat = (g_grayLinePid.rate_kp * error) +
+            (g_grayLinePid.rate_ki * candidate_i) +
+            (g_grayLinePid.rate_kd * d);
+    trim = clamp_f32(unsat,
+                     -g_grayLinePid.rate_trim_mps_max,
+                     g_grayLinePid.rate_trim_mps_max);
+
+    /* Do not accumulate more integral in the direction of a saturated trim. */
+    if (!((unsat > g_grayLinePid.rate_trim_mps_max && error > 0.0f) ||
+          (unsat < -g_grayLinePid.rate_trim_mps_max && error < 0.0f))) {
+        rt->rate_i = candidate_i;
+    }
+    rt->rate_prev_error = error;
+
+    if (error_out != NULL) {
+        *error_out = error;
+    }
+    return trim;
 }
 
 static void grayline_send_motor_cmd(MotorCmdType type, int16_t val, TickType_t wait_ticks)
@@ -181,16 +267,23 @@ static bool grayline_read_wheel_speeds(GrayLine_Runtime_t *rt,
     right_counts = (int32_t)(enc.right_total_counts - rt->speed_prev_right_total);
 
     *actual_left_mps = grayline_counts_to_mps(left_counts,
-                                             (float)MOTOR1_COUNTS_PER_OUTPUT_REV_CAL,
-                                             speed_dt);
-    *actual_right_mps = grayline_counts_to_mps(right_counts,
-                                              (float)MOTOR2_COUNTS_PER_OUTPUT_REV_CAL,
+                                              (float)MOTOR1_COUNTS_PER_OUTPUT_REV_CAL,
                                               speed_dt);
-    *dt_out = speed_dt;
+    *actual_right_mps = grayline_counts_to_mps(right_counts,
+                                               (float)MOTOR2_COUNTS_PER_OUTPUT_REV_CAL,
+                                               speed_dt);
 
     rt->speed_prev_left_total = enc.left_total_counts;
     rt->speed_prev_right_total = enc.right_total_counts;
     rt->speed_prev_seq = enc.seq;
+
+    /* Ignore a corrupt encoder frame instead of feeding an impossible speed to PID. */
+    if (abs_f32(*actual_left_mps) > GRAYLINE_MAX_WHEEL_SPEED_MPS ||
+        abs_f32(*actual_right_mps) > GRAYLINE_MAX_WHEEL_SPEED_MPS) {
+        return false;
+    }
+
+    *dt_out = speed_dt;
     return true;
 }
 
@@ -262,6 +355,12 @@ static void grayline_reset_control(GrayLine_Runtime_t *rt)
     rt->speed_ref_ready = false;
     rt->pos_i = 0.0f;
     rt->pos_prev_error = 0.0f;
+    rt->rate_i = 0.0f;
+    rt->rate_prev_error = 0.0f;
+    rt->target_rate_dps = 0.0f;
+    rt->actual_rate_dps = 0.0f;
+    rt->rate_filter_ready = false;
+    rt->telemetry_divider = 0U;
     rt->left_speed_i = 0.0f;
     rt->right_speed_i = 0.0f;
     rt->left_speed_prev_error = 0.0f;
@@ -297,11 +396,11 @@ bool GrayLine_ReadStatus(GrayLine_Status_t *out)
 
 static void grayline_print_help(void)
 {
-    LOG_RAW("[GRAYLINE] commands:\r\n");
-    LOG_RAW("[GRAYLINE]   grayline start\r\n");
-    LOG_RAW("[GRAYLINE]   grayline stop\r\n");
-    LOG_RAW("[GRAYLINE]   grayline status\r\n");
-    LOG_RAW("[GRAYLINE]   grayline pid\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "grayline start\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "grayline stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "grayline status\r\n");
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "grayline pid\r\n");
 }
 
 static void grayline_print_status(void)
@@ -309,15 +408,23 @@ static void grayline_print_status(void)
     GrayLine_Status_t st;
 
     (void)GrayLine_ReadStatus(&st);
-    LOG_RAW("[GRAYLINE] run=%u valid=%u seq=%lu mask=0x%02X pos=%.2f err=%.2f turn=%.3f\r\n",
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "run=%u valid=%u rate=%u seq=%lu mask=0x%02X pos=%.2f err=%.2f turn=%.3f\r\n",
             st.running ? 1U : 0U,
             st.line_valid ? 1U : 0U,
+            st.rate_loop_active ? 1U : 0U,
             (unsigned long)st.seq,
             (unsigned)st.active_mask,
             (double)st.line_pos,
             (double)st.error,
             (double)st.turn_mps);
-    LOG_RAW("[GRAYLINE] L %.3f/%.3f pwm=%d R %.3f/%.3f pwm=%d\r\n",
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "rate raw=%.1f tgt=%.1f act=%.1f err=%.1f trim=%.3f ff=%.3f\r\n",
+            (double)st.raw_target_rate_dps,
+            (double)st.target_rate_dps,
+            (double)st.actual_rate_dps,
+            (double)st.rate_error_dps,
+            (double)st.rate_trim_mps,
+            (double)st.pos_turn_ff_mps);
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "L %.3f/%.3f pwm=%d R %.3f/%.3f pwm=%d\r\n",
             (double)st.left_target_mps,
             (double)st.left_actual_mps,
             (int)st.left_pwm,
@@ -328,7 +435,7 @@ static void grayline_print_status(void)
 
 static void grayline_print_pid(void)
 {
-    LOG_RAW("[GRAYLINE] Kp=%.4f Ki=%.4f Kd=%.4f TurnMax=%.3f Base=%.3f LostMs=%.0f Slew=%.1f RevMax=%.3f\r\n",
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "Kp=%.4f Ki=%.4f Kd=%.4f TurnMax=%.3f Base=%.3f LostMs=%.0f Slew=%.1f RevMax=%.3f\r\n",
             (double)g_grayLinePid.kp,
             (double)g_grayLinePid.ki,
             (double)g_grayLinePid.kd,
@@ -337,14 +444,19 @@ static void grayline_print_pid(void)
             (double)g_grayLinePid.lost_timeout_ms,
             (double)g_grayLinePid.pwm_slew,
             (double)g_grayLinePid.reverse_mps_max);
+    LOGI_RELIABLE(LOG_MOD_GRAYLINE, "RateKp=%.4f RateKi=%.4f RateKd=%.4f RateMax=%.1f RateTrim=%.3f\r\n",
+            (double)g_grayLinePid.rate_kp,
+            (double)g_grayLinePid.rate_ki,
+            (double)g_grayLinePid.rate_kd,
+            (double)g_grayLinePid.rate_dps_max,
+            (double)g_grayLinePid.rate_trim_mps_max);
     grayline_print_status();
 }
 
 static void grayline_send_justfloat(const GrayLine_Status_t *st)
 {
-#if LOG_PRINT_PID_ENABLE
     static const uint8_t justfloat_tail[4] = {0x00, 0x00, 0x80, 0x7f};
-    float fdata[10];
+    float fdata[17];
 
     if (st == NULL) {
         return;
@@ -360,12 +472,16 @@ static void grayline_send_justfloat(const GrayLine_Status_t *st)
     fdata[7] = st->right_actual_mps;
     fdata[8] = (float)st->left_pwm;
     fdata[9] = (float)st->right_pwm;
+    fdata[10] = st->pos_turn_ff_mps;
+    fdata[11] = st->raw_target_rate_dps;
+    fdata[12] = st->target_rate_dps;
+    fdata[13] = st->actual_rate_dps;
+    fdata[14] = st->rate_error_dps;
+    fdata[15] = st->rate_trim_mps;
+    fdata[16] = st->rate_loop_active ? 1.0f : 0.0f;
 
-    LOG_SendRawBytes((const uint8_t *)fdata, sizeof(fdata));
-    LOG_SendRawBytes(justfloat_tail, sizeof(justfloat_tail));
-#else
-    (void)st;
-#endif
+    (void)LOG_SendTelemetryFrame(LOG_TELEMETRY_GRAYLINE, (const uint8_t *)fdata, sizeof(fdata),
+                                 justfloat_tail, sizeof(justfloat_tail));
 }
 
 static void grayline_start(GrayLine_Runtime_t *rt)
@@ -376,10 +492,7 @@ static void grayline_start(GrayLine_Runtime_t *rt)
 
     grayline_reset_control(rt);
     rt->running = true;
-    LOG_RAW("[GRAYLINE] start\r\n");
-#if LOG_PRINT_PID_ENABLE
-    g_log_suppress = true;
-#endif
+    LOGI(LOG_MOD_GRAYLINE, "start\r\n");
 }
 
 static void grayline_stop(GrayLine_Runtime_t *rt, bool print_msg)
@@ -393,13 +506,11 @@ static void grayline_stop(GrayLine_Runtime_t *rt, bool print_msg)
     grayline_stop_motors();
     grayline_reset_control(rt);
     rt->running = false;
-#if LOG_PRINT_PID_ENABLE
-    g_log_suppress = false;
-#endif
     memset(&st, 0, sizeof(st));
+    st.rate_loop_enabled = rt->rate_loop_enabled;
     grayline_write_status(&st);
     if (print_msg) {
-        LOG_RAW("[GRAYLINE] stop\r\n");
+        LOGI(LOG_MOD_GRAYLINE, "stop\r\n");
     }
 }
 
@@ -425,8 +536,25 @@ static void grayline_handle_command(GrayLine_Runtime_t *rt, const GrayLine_Comma
         case GRAYLINE_CMD_PID:
             grayline_print_pid();
             break;
+        case GRAYLINE_CMD_SET_RATE_LOOP: {
+            GrayLine_Status_t st;
+
+            rt->rate_loop_enabled = cmd->rate_loop_enabled;
+            rt->rate_i = 0.0f;
+            rt->rate_prev_error = 0.0f;
+            rt->target_rate_dps = 0.0f;
+            rt->actual_rate_dps = 0.0f;
+            rt->rate_filter_ready = false;
+            (void)GrayLine_ReadStatus(&st);
+            st.rate_loop_enabled = rt->rate_loop_enabled;
+            st.rate_loop_active = false;
+            grayline_write_status(&st);
+            LOGI(LOG_MOD_GRAYLINE, "rate loop %s\r\n",
+                 rt->rate_loop_enabled ? "on" : "off");
+            break;
+        }
         default:
-            LOG_RAW("[GRAYLINE] error: bad command\r\n");
+            LOGE(LOG_MOD_GRAYLINE, "error: bad command\r\n");
             break;
     }
 }
@@ -447,7 +575,14 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     float dt = (float)GRAYLINE_TASK_PERIOD_MS / 1000.0f;         /* 位置环 dt (s) */
     float error;                                                  /* 位置偏差 */
     float d;                                                      /* 位置微分项 */
-    float turn_mps;                                               /* 转弯速度修正 (m/s) */
+    float pos_turn_ff_mps;                                        /* 位置环转弯前馈 (m/s) */
+    float raw_target_rate_dps;                                    /* 限速前目标角速度 (deg/s) */
+    float target_rate_dps = 0.0f;                                 /* 平滑后的目标角速度 (deg/s) */
+    float actual_rate_dps = 0.0f;                                 /* 滤波后的实际角速度 (deg/s) */
+    float rate_error_dps = 0.0f;                                  /* 角速度误差 (deg/s) */
+    float rate_trim_mps = 0.0f;                                   /* 角速度环转向修正 (m/s) */
+    float turn_mps;                                               /* 最终转弯速度修正 (m/s) */
+    float gyro_rate_dps;                                          /* IMU 原始 Z 轴角速度 (deg/s) */
     float left_target;                                            /* 左轮目标速度 (m/s) */
     float right_target;                                           /* 右轮目标速度 (m/s) */
     float left_pwm_f;                                             /* 左轮 PWM 浮点值 */
@@ -456,6 +591,7 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     int16_t right_pwm;                                            /* 右轮最终 PWM ([-100,100]) */
     bool line_valid;                                              /* 当前帧线位置是否有效 */
     bool speed_ok;                                                /* 速度测量是否就绪 */
+    bool rate_loop_active = false;                                /* 角速度环是否可用 */
     TickType_t now;                                               /* 当前系统 tick 值 */
 
     if (rt == NULL || !rt->running) {                              /* 非运行态直接返回 */
@@ -499,12 +635,51 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     d = (error - rt->pos_prev_error) / dt;                         /* 微分：误差变化率 */
     rt->pos_prev_error = error;                                    /* 保存本次误差供下次微分使用 */
 
-    turn_mps = (g_grayLinePid.kp * error) +                        /* P 项 */
-               (g_grayLinePid.ki * rt->pos_i) +                    /* I 项 */
-               (g_grayLinePid.kd * d);                             /* D 项 */
-    turn_mps = clamp_f32(turn_mps,                                 /* 转弯速度限幅 */
-                         -g_grayLinePid.turn_mps_max,
-                         g_grayLinePid.turn_mps_max);
+    pos_turn_ff_mps = (g_grayLinePid.kp * error) +                /* P 项 */
+                      (g_grayLinePid.ki * rt->pos_i) +             /* I 项 */
+                      (g_grayLinePid.kd * d);                      /* D 项 */
+    pos_turn_ff_mps = clamp_f32(pos_turn_ff_mps,                   /* 转弯速度限幅 */
+                                -g_grayLinePid.turn_mps_max,
+                                g_grayLinePid.turn_mps_max);
+
+    /* ========== IMU 角速度阻尼环 ========== */
+    raw_target_rate_dps = grayline_turn_to_rate_dps(pos_turn_ff_mps);
+    raw_target_rate_dps = clamp_f32(raw_target_rate_dps,
+                                    -g_grayLinePid.rate_dps_max,
+                                    g_grayLinePid.rate_dps_max);
+    turn_mps = pos_turn_ff_mps;
+
+    if (rt->rate_loop_enabled && grayline_read_yaw_rate_dps(&gyro_rate_dps)) {
+        /* Keep line-following authority in the position loop; gyro feedback is damping only. */
+        rt->target_rate_dps = raw_target_rate_dps;
+        if (!rt->rate_filter_ready) {
+            rt->actual_rate_dps = gyro_rate_dps;
+            rt->rate_filter_ready = true;
+        } else {
+            rt->actual_rate_dps = grayline_lowpass(gyro_rate_dps,
+                                                    rt->actual_rate_dps,
+                                                    GRAYLINE_RATE_LP_ALPHA);
+        }
+
+        target_rate_dps = rt->target_rate_dps;
+        actual_rate_dps = rt->actual_rate_dps;
+        rate_trim_mps = grayline_rate_pid_step(rt,
+                                               target_rate_dps,
+                                               actual_rate_dps,
+                                               dt,
+                                               &rate_error_dps);
+        turn_mps = clamp_f32(pos_turn_ff_mps + rate_trim_mps,
+                             -g_grayLinePid.turn_mps_max,
+                             g_grayLinePid.turn_mps_max);
+        rate_loop_active = true;
+    } else {
+        /* IMU unavailable: keep the proven position-only controller active. */
+        rt->rate_i = 0.0f;
+        rt->rate_prev_error = 0.0f;
+        rt->target_rate_dps = 0.0f;
+        rt->actual_rate_dps = 0.0f;
+        rt->rate_filter_ready = false;
+    }
 
     /* ========== 速度分配 ========== */
     left_target = g_grayLinePid.base_mps - turn_mps;               /* 左轮 = 基准速度 - 转弯量（差速转向） */
@@ -550,16 +725,28 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     st.line_pos = line_pos;
     st.error = error;
     st.turn_mps = turn_mps;
+    st.pos_turn_ff_mps = pos_turn_ff_mps;
+    st.raw_target_rate_dps = raw_target_rate_dps;
+    st.target_rate_dps = target_rate_dps;
+    st.actual_rate_dps = actual_rate_dps;
+    st.rate_error_dps = rate_error_dps;
+    st.rate_trim_mps = rate_trim_mps;
     st.left_target_mps = left_target;
     st.left_actual_mps = actual_left_mps;
     st.right_target_mps = right_target;
     st.right_actual_mps = actual_right_mps;
     st.left_pwm = left_pwm;
     st.right_pwm = right_pwm;
+    st.rate_loop_enabled = rt->rate_loop_enabled;
+    st.rate_loop_active = rate_loop_active;
     st.active_mask = gray.active_mask;                             /* 传感器激活位掩码 */
     st.seq = gray.seq;                                             /* 传感器帧序号 */
     grayline_write_status(&st);                                    /* 写入全局状态（临界区保护） */
-    grayline_send_justfloat(&st);                                  /* 通过 justfloat 协议发送给上位机 */
+    rt->telemetry_divider++;
+    if (rt->telemetry_divider >= GRAYLINE_TELEMETRY_DIVIDER) {
+        rt->telemetry_divider = 0U;
+        grayline_send_justfloat(&st);                              /* 50 Hz JustFloat，避免阻塞 UART 扰动控制 */
+    }
     grayline_drive(left_pwm, right_pwm);                           /* 发送 PWM 到电机驱动 */
 }
 
@@ -572,8 +759,6 @@ void grayline_task(void *pvParameters)
 
     memset(&rt, 0, sizeof(rt));
     memset(&s_grayLineStatus, 0, sizeof(s_grayLineStatus));
-    LOG_INFO("[GRAYLINE] task ready\r\n");
-
     while (1) {
         GrayLine_Command_t cmd;
 

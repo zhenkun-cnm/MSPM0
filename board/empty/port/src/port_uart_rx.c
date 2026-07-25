@@ -3,6 +3,7 @@
  * @brief   UART0 interrupt-driven byte receive with ring buffer.
  */
 #include "port_uart_rx.h"
+#include "port_log.h"
 #include "ti_msp_dl_config.h"
 #include <ti/devices/msp/msp.h>
 #include <ti/driverlib/driverlib.h>
@@ -34,6 +35,7 @@ void UART0_IRQHandler(void)
         }
         /* 缓冲区满则丢弃，避免覆盖旧数据 */
     }
+    LOG_UART0_IRQHandler();
 }
 
 /* ──────── DevUartRx 接口 ──────── */

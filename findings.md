@@ -255,3 +255,43 @@ start_task:
 
 - The user chose stability over non-blocking logs after repeated boot-time faults.
 - All asynchronous logging variants were removed. UART output is restored to the original direct blocking implementation; stack/malloc hooks are restored to their prior disabled configuration.
+
+## 2026-07-21 - GrayLine yaw-rate damping decision
+
+- A 10 ms IMU update is retained because GrayLine itself runs at 10 ms; increasing only sensor reads would not improve actuator-loop bandwidth.
+- The yaw-rate loop is used as damping around the gray-position steering feed-forward. At straight-line target rate zero, it opposes unintended yaw; in a corner the gray-position command remains direct so sharp-turn authority is preserved.
+- Direct calibrated gyro-Z is preferable to INS `w_dps`, which is derived from yaw differences and may include magnetometer/estimator effects.
+- The 17-float JustFloat frame is 72 bytes and direct UART transmission is blocking. Telemetry is therefore limited to 50 Hz; control remains 100 Hz. Raising telemetry to 100 Hz would occupy about 6.25 ms of every 10 ms control period.
+
+## 2026-07-21 - GrayLine yaw-sign validation
+
+- With direct position-loop steering, JustFloat showed a negative correlation between GrayLine turn command and IMU Z rate, but physical steering verification showed that inverting gyro-Z was wrong. GrayLine retains the original IMU Z sign; INS yaw convention is unchanged.
+- One captured encoder frame reported an impossible `-6396 m/s` left-wheel speed. GrayLine now rejects encoder-derived speeds above `0.80 m/s` before its wheel-speed PID consumes them.
+
+## 2026-07-24 - Logging findings
+
+- The old implementation used 298 `LOG_RAW` calls and direct formatter bypasses, so compile-time levels did not meaningfully classify field diagnostics.
+- Blocking UART transport is deliberately retained: previous queue/task based logger variants caused boot-time HardFaults.
+- JustFloat now requires a named active producer, preventing Motion and GrayLine frames from interleaving with each other or text logs.
+
+## 2026-07-25 - UART DMA logging and PendSV fault finding
+
+- The supplied fault frame had `LR=0x4231`, which maps into `PendSV_Handler`; `PC=0` means a saved task context restored a null program counter. It is not evidence that a UART byte-transfer interrupt itself jumped to zero.
+- The old logger allocated 128-byte message plus 160-byte output arrays on every caller's task stack before calling formatted output. Multiple boot tasks have only 96--192 words of stack, so this made stack corruption plausible. Character-level UART interleaving proved concurrent access but did not alone explain PC=0.
+- Text logging is now best-effort DMA: one static 160-byte complete record, one whole DMA transfer, busy producer drops the whole record. There is no log queue, log task, TX FIFO ISR, dynamic allocation, or partial-record software transmit loop.
+- UART DMA completion only releases the slot on EOT, after the final hardware byte leaves the UART. RX remains serviced by the same UART0 IRQ handler.
+- Map verification: path capacity reduced 500 -> 292 points, and `s_pathPoints` is 3504 bytes. With 12-byte points this frees 2496 bytes; the logger transport adds 166 bytes beyond existing log state, leaving 2330 bytes net free RAM.
+- `configCHECK_FOR_STACK_OVERFLOW=2` and `vApplicationStackOverflowHook` are enabled. The hook intentionally uses direct UART because the normal logger may be the suspected failure path.
+
+## 2026-07-25 - Reliable log delivery finding
+
+- Startup loss was caused by `start_task` keeping interrupts disabled while issuing many ordinary DMA logs: EOT could not clear the sole busy flag. A 100-second stack report similarly issued about 19 records faster than 115200 baud can transmit.
+- A dedicated TX task is unnecessary for the selected policy. Reliable callers wait on UART EOT through a mutex and task notification; the ISR only handles completion and never feeds partial records.
+- Reliable paths are intentionally restricted to boot, ERROR, command replies, and the low-priority stack monitor. Arbitrarily high-rate normal logs remain drop-on-busy so motor/navigation timing is not coupled to UART throughput.
+
+## 2026-07-25 - Boot log reduction rationale
+
+- Per-task creation and `task ready` records repeat the successful creation path. One `Worker tasks created` record keeps the useful boot milestone without a burst of reliable UART waits.
+- ICM-20608 and LIS3MDL final records include selected I2C address and WHO_AM_I. SDA/SCL state, scans, probes, and ACK listings are DEBUG-only; transfer and initialization failures remain ERROR.
+- Flash now emits one JEDEC/capacity summary and `Flash selftest PASS`; erase/program/readback phases are silent unless an operation fails.
+- Gray receives 154 words (616 bytes), exactly 20% above 128 words (512 bytes). On-target stack report must still show `min_ever >= 2048` bytes.

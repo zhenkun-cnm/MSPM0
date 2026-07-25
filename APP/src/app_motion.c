@@ -359,8 +359,8 @@ static void motion_send_yaw_justfloat(float target_yaw_deg, float actual_yaw_deg
 
     fdata[0] = target_yaw_deg;
     fdata[1] = actual_yaw_deg;
-    LOG_SendRawBytes((const uint8_t *)fdata, sizeof(fdata));
-    LOG_SendRawBytes(justfloat_tail, sizeof(justfloat_tail));
+    (void)LOG_SendTelemetryFrame(LOG_TELEMETRY_MOTION, (const uint8_t *)fdata, sizeof(fdata),
+                                 justfloat_tail, sizeof(justfloat_tail));
 }
 
 static void motion_send_arc_justfloat(float target_left_mps,
@@ -383,8 +383,8 @@ static void motion_send_arc_justfloat(float target_left_mps,
     fdata[5] = actual_yaw_deg;
     fdata[6] = left_pwm;
     fdata[7] = right_pwm;
-    LOG_SendRawBytes((const uint8_t *)fdata, sizeof(fdata));
-    LOG_SendRawBytes(justfloat_tail, sizeof(justfloat_tail));
+    (void)LOG_SendTelemetryFrame(LOG_TELEMETRY_MOTION, (const uint8_t *)fdata, sizeof(fdata),
+                                 justfloat_tail, sizeof(justfloat_tail));
 }
 
 static const char *motion_state_name(Motion_State_t state)
@@ -449,7 +449,7 @@ static void motion_mark_rejected(uint32_t cmd_id)
 
 static void motion_ack_accept(uint32_t cmd_id, Motion_CommandType_t type, float value)
 {
-    log_printf_internal("[MOTION_ACK] accept cmd_id=0x%08lX type=%s value=%+.3f\r\n",
+    LOGD(LOG_MOD_MOTION, "accept cmd_id=0x%08lX type=%s value=%+.3f\r\n",
                         (unsigned long)cmd_id,
                         motion_cmd_type_name(type),
                         value);
@@ -457,7 +457,7 @@ static void motion_ack_accept(uint32_t cmd_id, Motion_CommandType_t type, float 
 
 static void motion_ack_reject(uint32_t cmd_id, Motion_CommandType_t type, float value, const char *reason)
 {
-    log_printf_internal("[MOTION_ACK] reject cmd_id=0x%08lX type=%s value=%+.3f reason=%s state=%s\r\n",
+    LOGD(LOG_MOD_MOTION, "reject cmd_id=0x%08lX type=%s value=%+.3f reason=%s state=%s\r\n",
                         (unsigned long)cmd_id,
                         motion_cmd_type_name(type),
                         value,
@@ -467,26 +467,26 @@ static void motion_ack_reject(uint32_t cmd_id, Motion_CommandType_t type, float 
 
 static void motion_ack_done(uint32_t cmd_id, Motion_Result_t result)
 {
-    log_printf_internal("[MOTION_ACK] done cmd_id=0x%08lX result=%s\r\n",
+    LOGD(LOG_MOD_MOTION, "done cmd_id=0x%08lX result=%s\r\n",
                         (unsigned long)cmd_id,
                         motion_result_name(result));
 }
 
 static void motion_print_help(void)
 {
-    LOG_RAW("[MOTION_CMD] commands:\r\n");
-    LOG_RAW("[MOTION_CMD]   motion help\r\n");
-    LOG_RAW("[MOTION_CMD]   motion status\r\n");
-    LOG_RAW("[MOTION_CMD]   motion stop\r\n");
-    LOG_RAW("[MOTION_CMD]   motion fwd <meters>\r\n");
-    LOG_RAW("[MOTION_CMD]   motion back <meters>\r\n");
-    LOG_RAW("[MOTION_CMD]   motion turn <-180..180 deg>\r\n");
-    LOG_RAW("[MOTION_CMD]   motion arc <radius_m> <-180..180 deg>\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "commands:\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion help\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion status\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion stop\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion fwd <meters>\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion back <meters>\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion turn <-180..180 deg>\r\n");
+    LOGI_RELIABLE(LOG_MOD_MOTION, "motion arc <radius_m> <-180..180 deg>\r\n");
 }
 
 static void motion_print_status(const Motion_Runtime_t *rt)
 {
-    LOG_RAW("[MOTION_CMD] state=%s target=%.3f target_yaw=%+.2f progress=%.3f err=%.3f yaw_err=%+.2f pwm L=%d R=%d X=%+.3f Y=%+.3f YAW=%+.2f W=%+.2f flags=0x%08lX active=%lu done=%lu rejected=%lu result=%s\r\n",
+    LOGI_RELIABLE(LOG_MOD_MOTION, "state=%s target=%.3f target_yaw=%+.2f progress=%.3f err=%.3f yaw_err=%+.2f pwm L=%d R=%d X=%+.3f Y=%+.3f YAW=%+.2f W=%+.2f flags=0x%08lX active=%lu done=%lu rejected=%lu result=%s\r\n",
             motion_state_name(rt->state),
             rt->target_value,
             rt->target_yaw_deg,
@@ -504,19 +504,19 @@ static void motion_print_status(const Motion_Runtime_t *rt)
             (unsigned long)g_motionRtStatus.done_cmd_id,
             (unsigned long)g_motionRtStatus.rejected_cmd_id,
             motion_result_name(g_motionRtStatus.last_result));
-    LOG_RAW("[MOTION_CMD] StraightYaw Kp=%.2f Ki=%.2f Kd=%.2f TrimMax=%.1f\r\n",
+    LOGI_RELIABLE(LOG_MOD_MOTION, "StraightYaw Kp=%.2f Ki=%.2f Kd=%.2f TrimMax=%.1f\r\n",
             g_motionPid.straight_yaw.kp,
             g_motionPid.straight_yaw.ki,
             g_motionPid.straight_yaw.kd,
             g_motionPid.straight_yaw.trim_max);
-    LOG_RAW("[MOTION_CMD] TurnYaw Kp=%.2f Ki=%.2f Kd=%.2f Dead=%.1f PwmMin=%.1f PwmMax=%.1f\r\n",
+    LOGI_RELIABLE(LOG_MOD_MOTION, "TurnYaw Kp=%.2f Ki=%.2f Kd=%.2f Dead=%.1f PwmMin=%.1f PwmMax=%.1f\r\n",
             g_motionPid.turn_yaw.kp,
             g_motionPid.turn_yaw.ki,
             g_motionPid.turn_yaw.kd,
             g_motionPid.turn_yaw.deadband_deg,
             g_motionPid.turn_yaw.pwm_min,
             g_motionPid.turn_yaw.pwm_max);
-    LOG_RAW("[MOTION_CMD] WheelSpd Kp=%.2f Ki=%.2f Kd=%.2f PwmTrim=%.1f\r\n",
+    LOGI_RELIABLE(LOG_MOD_MOTION, "WheelSpd Kp=%.2f Ki=%.2f Kd=%.2f PwmTrim=%.1f\r\n",
             g_motionPid.wheel_speed.kp,
             g_motionPid.wheel_speed.ki,
             g_motionPid.wheel_speed.kd,
@@ -533,27 +533,27 @@ static bool motion_start_straight(Motion_Runtime_t *rt, Motion_State_t state, fl
             motion_stop_motors();
             rt->state = MOTION_STATE_IDLE;
         } else {
-            LOG_RAW("[MOTION_CMD] error: busy, use motion stop first\r\n");
+            LOGE(LOG_MOD_MOTION, "error: busy, use motion stop first\r\n");
             motion_mark_rejected(cmd_id);
             motion_ack_reject(cmd_id, cmd_type, distance_m, "busy");
             return false;
         }
     }
     if (rt->state != MOTION_STATE_IDLE) {
-        LOG_RAW("[MOTION_CMD] error: busy, use motion stop first\r\n");
+        LOGE(LOG_MOD_MOTION, "error: busy, use motion stop first\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, cmd_type, distance_m, "busy");
         return false;
     }
     if (distance_m < MOTION_MIN_DIST_M || distance_m > MOTION_MAX_DIST_M) {
-        LOG_RAW("[MOTION_CMD] error: distance range %.2f..%.2fm\r\n",
+        LOGE(LOG_MOD_MOTION, "error: distance range %.2f..%.2fm\r\n",
                 MOTION_MIN_DIST_M, MOTION_MAX_DIST_M);
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, cmd_type, distance_m, "range");
         return false;
     }
     if (!get_latest_pose(&pose) || !pose_ready(&pose)) {
-        LOG_RAW("[MOTION_CMD] error: INS not ready\r\n");
+        LOGE(LOG_MOD_MOTION, "error: INS not ready\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, cmd_type, distance_m, "ins_not_ready");
         return false;
@@ -593,9 +593,8 @@ static bool motion_start_straight(Motion_Runtime_t *rt, Motion_State_t state, fl
                           MOTION_STRAIGHT_SPEED_PCT,
                           MOTION_STRAIGHT_SPEED_PCT);
 
-    LOG_RAW("[MOTION] start %s dist=%.3fm yaw=%+.2f\r\n",
+    LOGI(LOG_MOD_MOTION, "start %s dist=%.3fm yaw=%+.2f\r\n",
             motion_state_name(state), distance_m, pose.yaw_deg);
-    g_log_suppress = true;   /* 直行期间抑制所有 LOG 文本，保护 JustFloat 流 */
     return true;
 }
 
@@ -604,19 +603,19 @@ static bool motion_start_turn(Motion_Runtime_t *rt, float angle_deg, uint32_t cm
     INS_Pose_t pose;
 
     if (rt->state != MOTION_STATE_IDLE) {
-        LOG_RAW("[MOTION_CMD] error: busy, use motion stop first\r\n");
+        LOGE(LOG_MOD_MOTION, "error: busy, use motion stop first\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, MOTION_CMD_TURN, angle_deg, "busy");
         return false;
     }
     if (fabsf(angle_deg) < MOTION_MIN_TURN_DEG || fabsf(angle_deg) > MOTION_MAX_TURN_DEG) {
-        LOG_RAW("[MOTION_CMD] error: turn range -180..180 deg, zero rejected\r\n");
+        LOGE(LOG_MOD_MOTION, "error: turn range -180..180 deg, zero rejected\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, MOTION_CMD_TURN, angle_deg, "range");
         return false;
     }
     if (!get_latest_pose(&pose) || !pose_ready(&pose)) {
-        LOG_RAW("[MOTION_CMD] error: INS not ready\r\n");
+        LOGE(LOG_MOD_MOTION, "error: INS not ready\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, MOTION_CMD_TURN, angle_deg, "ins_not_ready");
         return false;
@@ -641,7 +640,7 @@ static bool motion_start_turn(Motion_Runtime_t *rt, float angle_deg, uint32_t cm
 
     motion_drive_single_wheel_cmd(angle_deg);
 
-    LOG_RAW("[MOTION] start TURN angle=%+.1f yaw=%+.2f target_yaw=%+.2f mode=%s\r\n",
+    LOGI(LOG_MOD_MOTION, "start TURN angle=%+.1f yaw=%+.2f target_yaw=%+.2f mode=%s\r\n",
             angle_deg,
             pose.yaw_deg,
             rt->target_yaw_deg,
@@ -660,13 +659,13 @@ static bool motion_start_arc(Motion_Runtime_t *rt, float radius_m, float angle_d
     int16_t right_pwm;
 
     if (rt->state != MOTION_STATE_IDLE) {
-        LOG_RAW("[MOTION_CMD] error: busy, use motion stop first\r\n");
+        LOGE(LOG_MOD_MOTION, "error: busy, use motion stop first\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, MOTION_CMD_ARC, radius_m, "busy");
         return false;
     }
     if (radius_m < MOTION_MIN_ARC_RADIUS_M || radius_m > MOTION_MAX_ARC_RADIUS_M) {
-        LOG_RAW("[MOTION_CMD] error: arc radius range %.2f..%.2fm\r\n",
+        LOGE(LOG_MOD_MOTION, "error: arc radius range %.2f..%.2fm\r\n",
                 MOTION_MIN_ARC_RADIUS_M,
                 MOTION_MAX_ARC_RADIUS_M);
         motion_mark_rejected(cmd_id);
@@ -675,7 +674,7 @@ static bool motion_start_arc(Motion_Runtime_t *rt, float radius_m, float angle_d
     }
     if (fabsf(angle_deg) < MOTION_MIN_ARC_ANGLE_DEG ||
         fabsf(angle_deg) > MOTION_MAX_ARC_ANGLE_DEG) {
-        LOG_RAW("[MOTION_CMD] error: arc angle range +/-%.1f..%.1f deg\r\n",
+        LOGE(LOG_MOD_MOTION, "error: arc angle range +/-%.1f..%.1f deg\r\n",
                 MOTION_MIN_ARC_ANGLE_DEG,
                 MOTION_MAX_ARC_ANGLE_DEG);
         motion_mark_rejected(cmd_id);
@@ -683,7 +682,7 @@ static bool motion_start_arc(Motion_Runtime_t *rt, float radius_m, float angle_d
         return false;
     }
     if (!get_latest_pose(&pose) || !pose_ready(&pose)) {
-        LOG_RAW("[MOTION_CMD] error: INS not ready\r\n");
+        LOGE(LOG_MOD_MOTION, "error: INS not ready\r\n");
         motion_mark_rejected(cmd_id);
         motion_ack_reject(cmd_id, MOTION_CMD_ARC, radius_m, "ins_not_ready");
         return false;
@@ -741,7 +740,7 @@ static bool motion_start_arc(Motion_Runtime_t *rt, float radius_m, float angle_d
     right_pwm = rt->last_right_pwm;
     motion_drive_arc(left_pwm, right_pwm);
 
-    LOG_RAW("[MOTION] start ARC radius=%.3fm angle=%+.1f yaw=%+.2f target_yaw=%+.2f Ltar=%.3f Rtar=%.3f timeout=%lums\r\n",
+    LOGI(LOG_MOD_MOTION, "start ARC radius=%.3fm angle=%+.1f yaw=%+.2f target_yaw=%+.2f Ltar=%.3f Rtar=%.3f timeout=%lums\r\n",
             radius_m,
             angle_deg,
             pose.yaw_deg,
@@ -749,7 +748,6 @@ static bool motion_start_arc(Motion_Runtime_t *rt, float radius_m, float angle_d
             rt->arc_target_left_mps,
             rt->arc_target_right_mps,
             (unsigned long)rt->arc_timeout_ms);
-    g_log_suppress = true;
     return true;
 }
 
@@ -761,8 +759,7 @@ static void motion_finish(Motion_Runtime_t *rt, const char *reason, Motion_Resul
     g_motionRtStatus.done_cmd_id = rt->active_cmd_id;
     g_motionRtStatus.last_result = result;
     motion_ack_done(rt->active_cmd_id, result);
-    g_log_suppress = false;  /* 恢复 LOG 输出 */
-    LOG_RAW("[MOTION] %s state=%s cmd_id=%lu result=%s progress=%.3f err=%.3f yaw_err=%+.2f X=%+.3f Y=%+.3f YAW=%+.2f\r\n",
+    LOGI(LOG_MOD_MOTION, "%s state=%s cmd_id=%lu result=%s progress=%.3f err=%.3f yaw_err=%+.2f X=%+.3f Y=%+.3f YAW=%+.2f\r\n",
             reason,
             motion_state_name(rt->state),
             (unsigned long)rt->active_cmd_id,
@@ -792,7 +789,7 @@ static void motion_handle_command(Motion_Runtime_t *rt, const Motion_Command_t *
         case MOTION_CMD_STOP:
             if (rt->state == MOTION_STATE_IDLE) {
                 motion_stop_motors();
-                LOG_RAW("[MOTION] stop ok, already idle\r\n");
+                LOGI(LOG_MOD_MOTION, "stop ok, already idle\r\n");
             } else {
                 motion_finish(rt, "stopped", MOTION_RESULT_STOPPED);
             }
@@ -810,7 +807,7 @@ static void motion_handle_command(Motion_Runtime_t *rt, const Motion_Command_t *
             (void)motion_start_arc(rt, cmd->value, cmd->value2, cmd->cmd_id);
             break;
         default:
-            LOG_RAW("[MOTION_CMD] error: bad command\r\n");
+            LOGE(LOG_MOD_MOTION, "error: bad command\r\n");
             motion_mark_rejected(cmd->cmd_id);
             break;
     }
@@ -914,16 +911,14 @@ static void motion_update_straight(Motion_Runtime_t *rt, const INS_Pose_t *pose)
     motion_set_pwm_record(rt, left, right);
 
     /* VOFA+ JustFloat: 发送 2 通道浮点数据 + 帧尾 */
-#if LOG_PRINT_PID_ENABLE
     {
         static const uint8_t justfloat_tail[4] = {0x00, 0x00, 0x80, 0x7f};
         float fdata[2];
         fdata[0] = rt->start_pose.yaw_deg;  /* Ch0: 目标角度 */
         fdata[1] = pose->yaw_deg;           /* Ch1: 实际角度 */
-        LOG_SendRawBytes((const uint8_t *)fdata, sizeof(fdata));
-        LOG_SendRawBytes(justfloat_tail, sizeof(justfloat_tail));
+        (void)LOG_SendTelemetryFrame(LOG_TELEMETRY_MOTION, (const uint8_t *)fdata, sizeof(fdata),
+                                     justfloat_tail, sizeof(justfloat_tail));
     }
-#endif
 
     if (progress >= (rt->target_value - MOTION_DIST_TOL_M)) {
         motion_finish(rt, "done", MOTION_RESULT_DONE);
@@ -959,9 +954,7 @@ static void motion_update_turn(Motion_Runtime_t *rt, const INS_Pose_t *pose)
         return;
     }
 
-#if LOG_PRINT_PID_ENABLE
     motion_send_yaw_justfloat(rt->target_yaw_deg, pose->yaw_deg);
-#endif
 
     rt->turn_yaw_i += error * dt;
     rt->turn_yaw_i = clamp_f32(rt->turn_yaw_i,
@@ -1076,7 +1069,6 @@ static void motion_update_arc(Motion_Runtime_t *rt, const INS_Pose_t *pose)
     g_motionRtStatus.actual_left_mps = actual_left_mps;
     g_motionRtStatus.actual_right_mps = actual_right_mps;
 
-#if LOG_PRINT_PID_ENABLE
     motion_send_arc_justfloat(rt->arc_target_left_mps,
                               actual_left_mps,
                               rt->arc_target_right_mps,
@@ -1085,7 +1077,6 @@ static void motion_update_arc(Motion_Runtime_t *rt, const INS_Pose_t *pose)
                               pose->yaw_deg,
                               (float)left_pwm,
                               (float)right_pwm);
-#endif
 
     motion_drive_arc(left_pwm, right_pwm);
 }
@@ -1143,8 +1134,6 @@ void motion_task(void *pvParameters)
     (void)get_latest_pose(&rt.start_pose);
     rt.last_pose = rt.start_pose;
     lastWake = xTaskGetTickCount();
-
-    LOG_INFO("[MOTION] task ready: motion help\r\n");
 
     while (1) {
         Motion_Command_t cmd;

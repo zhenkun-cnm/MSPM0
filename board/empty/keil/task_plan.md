@@ -340,3 +340,18 @@ Status: implemented and clean-build verified; on-target validation pending.
 - Reduce cold-boot output to the worker-task summary, device final identities, calibration results, encoder DMA, TFT, INS yaw, CLI, and Flash self-test result.
 - Keep initialization and self-test failures as reliable ERROR records; I2C scan/probe details are DEBUG-only.
 - Increase `GRAY_TASK_STACK_WORDS` and the stack monitor baseline from 128 to 154 words (+104 bytes from the FreeRTOS heap).
+
+## 2026-07-26 - Three-mode path/gray fusion
+
+Status: implemented and Keil rebuild verified; on-target validation pending.
+
+- `app_path.c` remains the INS path-direction authority. The new fusion mode uses grayscale only as a local steering correction; it does not alter INS pose, yaw, or recorded path points.
+- `GRAYLINE`, pure `PATH`, and `PATH_FUSION` are mutually exclusive APP drive modes. Fusion grants motor output only to `app_path`; GrayLine runs as a non-driving assist source.
+- CLI and TFT provide pure GrayLine, pure Path Replay, and Fusion Start/Stop. Mode changes stop and release the previous owner before starting the next owner.
+
+## 2026-07-26 - Fusion startup path-only fallback
+
+Status: implemented and Keil rebuild verified; on-target validation pending.
+
+- `path fusion start` enters continuous `app_path` tracking immediately, even when no black line has been detected.
+- Fresh grayscale data remains optional: it enables the existing forward/same-direction blend; no-line, stale, conflict, or reverse operation remains path-only without stopping the vehicle.

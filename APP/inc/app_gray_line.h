@@ -38,12 +38,14 @@ typedef enum {
     GRAYLINE_CMD_START,
     GRAYLINE_CMD_STOP,
     GRAYLINE_CMD_PID,
-    GRAYLINE_CMD_SET_RATE_LOOP
+    GRAYLINE_CMD_SET_RATE_LOOP,
+    GRAYLINE_CMD_SET_PATH_ASSIST
 } GrayLine_CommandType_t;
 
 typedef struct {
     GrayLine_CommandType_t type;
     bool                    rate_loop_enabled;
+    bool                    path_assist_enabled;
 } GrayLine_Command_t;
 
 typedef struct {
@@ -67,7 +69,10 @@ typedef struct {
     int16_t right_pwm;
     bool rate_loop_enabled;
     bool rate_loop_active;
+    bool path_assist_active;
+    bool line_fresh;
     uint8_t active_mask;
+    uint32_t sample_tick;
     uint32_t seq;
 } GrayLine_Status_t;
 

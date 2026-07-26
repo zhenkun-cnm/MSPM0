@@ -540,6 +540,11 @@
               <FilePath>..\..\..\APP\src\app_path.c</FilePath>
             </File>
             <File>
+              <FileName>app_drive_mode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_drive_mode.c</FilePath>
+            </File>
+            <File>
               <FileName>app_gray.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_gray.c</FilePath>

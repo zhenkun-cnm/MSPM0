@@ -15,6 +15,7 @@
 #include "app_tb6612.h"
 #include "app_motion.h"
 #include "app_gray_line.h"
+#include "app_drive_mode.h"
 #include "app_imu.h"
 #include "app_ins.h"
 #include "app_path.h"
@@ -41,6 +42,7 @@ static int16_t g_rightSpeed    = 0;
 /* Helper: send motor command to tb6612_task queue */
 static void motorCmdSend(MotorCmdType type, int16_t val)
 {
+    if (DriveMode_IsActive()) return;
     if (g_motorCmdQueue == NULL) return;
     MotorCmd cmd;
     cmd.type = type;
@@ -73,6 +75,7 @@ static bool graylineCmdSend(GrayLine_CommandType_t type, bool rateLoopEnabled)
     if (g_grayLineCmdQueue == NULL) return false;
     cmd.type = type;
     cmd.rate_loop_enabled = rateLoopEnabled;
+    cmd.path_assist_enabled = false;
     return xQueueSend(g_grayLineCmdQueue, &cmd, 0) == pdTRUE;
 }
 
@@ -146,16 +149,24 @@ static const MenuItem grayLinePidItems[] = {
 };
 #define GRAYLINE_PID_ITEM_COUNT  (sizeof(grayLinePidItems) / sizeof(grayLinePidItems[0]))
 
+static const MenuItem pathFusionPidItems[] = {
+    {"GrayWt",   MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_pathFusionConfig.gray_weight},            {.f = 0.0f}, {.f = 1.0f},  {.f = 0.05f}},
+    {"GrayGain", MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_pathFusionConfig.gray_turn_to_pwm},       {.f = 0.0f}, {.f = 100.0f},{.f = 1.0f}},
+    {"GrayMax",  MENU_VALUE, NULL, 0, MENU_VAL_FLOAT, {.f = &g_pathFusionConfig.gray_trim_max_pwm},      {.f = 0.0f}, {.f = 8.0f},  {.f = 0.5f}},
+};
+#define PATH_FUSION_PID_ITEM_COUNT (sizeof(pathFusionPidItems) / sizeof(pathFusionPidItems[0]))
+
 static const MenuItem pidItems[] = {
     {"Straight",  MENU_SUBMENU, straightYawPidItems, (uint8_t)STRAIGHT_YAW_PID_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"TurnYaw",   MENU_SUBMENU, turnYawPidItems,     (uint8_t)TURN_YAW_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"WheelSpd",  MENU_SUBMENU, wheelSpeedPidItems,  (uint8_t)WHEEL_SPEED_PID_ITEM_COUNT,  MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Arc",       MENU_SUBMENU, arcPidItems,         (uint8_t)ARC_PID_ITEM_COUNT,          MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"GrayLine",  MENU_SUBMENU, grayLinePidItems,    (uint8_t)GRAYLINE_PID_ITEM_COUNT,     MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"PathFusion",MENU_SUBMENU, pathFusionPidItems,  (uint8_t)PATH_FUSION_PID_ITEM_COUNT,  MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Yaw Status", MENU_LEAF,    NULL,                0,                                   MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
 #define PID_ITEM_COUNT  (sizeof(pidItems) / sizeof(pidItems[0]))
-#define PID_YAW_STATUS_INDEX 5U
+#define PID_YAW_STATUS_INDEX 6U
 
 static const MenuItem testItems[] = {
     {"Motor_Test", MENU_SUBMENU, motorItems, MOTOR_ITEM_COUNT, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
@@ -170,6 +181,8 @@ static const MenuItem insViewItems[] = {
     {"Path Save", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Path Load", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Path Replay", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Fusion Start", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
+    {"Fusion Stop", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"Path Stop", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
     {"M2 RevFix", MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
 };
@@ -181,8 +194,10 @@ static const MenuItem insViewItems[] = {
 #define INS_PATH_SAVE_INDEX       4U
 #define INS_PATH_LOAD_INDEX       5U
 #define INS_PATH_REPLAY_INDEX     6U
-#define INS_PATH_STOP_INDEX       7U
-#define INS_VIEW_M2_REVFIX_INDEX  8U
+#define INS_FUSION_START_INDEX    7U
+#define INS_FUSION_STOP_INDEX     8U
+#define INS_PATH_STOP_INDEX       9U
+#define INS_VIEW_M2_REVFIX_INDEX  10U
 
 static const MenuItem grayLineItems[] = {
     {"Start",     MENU_LEAF, NULL, 0, MENU_VAL_INT, {.i = NULL}, {.i = 0}, {.i = 0}, {.i = 0}},
@@ -247,6 +262,7 @@ static const char *path_cmd_name(Path_CommandType_t command)
         case PATH_CMD_SAVE:         return "SAVE";
         case PATH_CMD_LOAD:         return "LOAD";
         case PATH_CMD_REPLAY:       return "REPLAY";
+        case PATH_CMD_FUSION_START: return "FUSION";
         case PATH_CMD_STOP:         return "STOP";
         default:                    return "PATH";
     }
@@ -588,16 +604,24 @@ static bool handle_quick_leaf(const MenuItem *cur, MenuCtx *ctx)
     } else if (cur == &insViewItems[INS_PATH_LOAD_INDEX]) {
         menu_queue_path(PATH_CMD_LOAD);
     } else if (cur == &insViewItems[INS_PATH_REPLAY_INDEX]) {
-        menu_queue_path(PATH_CMD_REPLAY);
+        g_lastKeyMsg = DriveMode_Request(DRIVE_MODE_CMD_START_PATH, 0) ?
+                       "PATH START" : "MODE QUEUE ERR";
+    } else if (cur == &insViewItems[INS_FUSION_START_INDEX]) {
+        g_lastKeyMsg = DriveMode_Request(DRIVE_MODE_CMD_START_PATH_FUSION, 0) ?
+                       "FUSION START" : "MODE QUEUE ERR";
+    } else if (cur == &insViewItems[INS_FUSION_STOP_INDEX]) {
+        g_lastKeyMsg = DriveMode_Request(DRIVE_MODE_CMD_STOP, 0) ?
+                       "FUSION STOP" : "MODE QUEUE ERR";
     } else if (cur == &insViewItems[INS_PATH_STOP_INDEX]) {
-        menu_queue_path(PATH_CMD_STOP);
+        g_lastKeyMsg = DriveMode_Request(DRIVE_MODE_CMD_STOP, 0) ?
+                       "DRIVE STOP" : "MODE QUEUE ERR";
     } else if (cur == &insViewItems[INS_VIEW_M2_REVFIX_INDEX]) {
         menu_queue_ins(INS_CMD_FLIP);
     } else if (cur == &grayLineItems[GRAYLINE_START_INDEX]) {
-        g_lastKeyMsg = graylineCmdSend(GRAYLINE_CMD_START, false) ?
+        g_lastKeyMsg = DriveMode_Request(DRIVE_MODE_CMD_START_GRAYLINE, 0) ?
                        "GRAY START" : "GRAY QUEUE ERR";
     } else if (cur == &grayLineItems[GRAYLINE_STOP_INDEX]) {
-        g_lastKeyMsg = graylineCmdSend(GRAYLINE_CMD_STOP, false) ?
+        g_lastKeyMsg = DriveMode_Request(DRIVE_MODE_CMD_STOP, 0) ?
                        "GRAY STOP" : "GRAY QUEUE ERR";
     } else if (cur == &grayLineItems[GRAYLINE_RATE_LOOP_INDEX]) {
         GrayLine_Status_t status;
@@ -628,6 +652,7 @@ static void ins_view_render(DevTFT *tft)
     static uint16_t prevPathPoints = 0xFFFFU;
     static uint16_t prevReplayIndex = 0xFFFFU;
     static Path_State_t prevPathState = (Path_State_t)(-1);
+    static DriveMode_t prevDriveMode = (DriveMode_t)(-1);
 
     if (g_insViewFirstRender) {
         g_insViewFirstRender = false;
@@ -636,6 +661,7 @@ static void ins_view_render(DevTFT *tft)
         prevPathPoints = 0xFFFFU;
         prevReplayIndex = 0xFFFFU;
         prevPathState = (Path_State_t)(-1);
+        prevDriveMode = (DriveMode_t)(-1);
         tft->fillScreen(tft, TFT_BLACK);
         tft->printString(tft, 0, 0, "--- INS ---", TFT_YELLOW, TFT_BLACK);
         tft->printString(tft, 0, KEY_STATUS_Y, "Long=Back", TFT_GRAY, TFT_BLACK);
@@ -676,15 +702,24 @@ static void ins_view_render(DevTFT *tft)
 
     {
         Path_RuntimeStatus_t path;
+        DriveMode_Status_t drive;
         if (Path_Status_Read(&path) &&
+            DriveMode_Status_Read(&drive) &&
             (path.sequence != prevPathSequence ||
              path.point_count != prevPathPoints ||
              path.replay_index != prevReplayIndex ||
-             path.state != prevPathState)) {
+             path.state != prevPathState || drive.mode != prevDriveMode)) {
             tft->fillRect(tft, 0, 6 * MENU_ROW_H, TFT_WIDTH, MENU_ROW_H, TFT_BLACK);
             if (path.result == PATH_RESULT_ERROR) {
                 tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_RED, TFT_BLACK,
                             "P ERR:%s", path_error_name(path.error));
+            } else if (drive.mode == DRIVE_MODE_PATH_FUSION) {
+                tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_YELLOW, TFT_BLACK,
+                            "F%u G%+.1f P%+.1f", (unsigned)path.fusion_mode,
+                            (double)path.fusion_gray_trim_pwm,
+                            (double)path.fusion_path_trim_pwm);
+            } else if (drive.mode == DRIVE_MODE_GRAYLINE) {
+                tft->printString(tft, 0, 6 * MENU_ROW_H, "GRAY RUN", TFT_YELLOW, TFT_BLACK);
             } else if (path.result == PATH_RESULT_RUNNING ||
                        path.state == PATH_STATE_REPLAY_TRACK) {
                 tft->printf(tft, 0, 6 * MENU_ROW_H, TFT_YELLOW, TFT_BLACK,
@@ -703,6 +738,7 @@ static void ins_view_render(DevTFT *tft)
             prevPathPoints = path.point_count;
             prevReplayIndex = path.replay_index;
             prevPathState = path.state;
+            prevDriveMode = drive.mode;
         }
     }
 }

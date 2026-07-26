@@ -9,6 +9,7 @@
 #include "app_path.h"
 #include "app_gray.h"
 #include "app_gray_line.h"
+#include "app_drive_mode.h"
 #include "app_motor_encoder.h"
 #include "app_tb6612.h"
 #include "app_test1.h"
@@ -245,6 +246,7 @@ static bool send_grayline_cmd(GrayLine_CommandType_t type)
     GrayLine_Command_t cmd;
     cmd.type = type;
     cmd.rate_loop_enabled = false;
+    cmd.path_assist_enabled = false;
 
     if (g_grayLineCmdQueue == NULL) {
         LOGI_RELIABLE(LOG_MOD_CLI, "error: queue not ready\r\n");
@@ -322,6 +324,10 @@ static void speedtest_print_help(void)
 
 static void speedtest_start_regular(bool reverse, int16_t left_pwm, int16_t right_pwm)
 {
+    if (DriveMode_IsActive()) {
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: stop drive mode before speedtest\r\n");
+        return;
+    }
     memset(&s_speedTest, 0, sizeof(s_speedTest));
     s_speedTest.running = true;
     s_speedTest.mode = reverse ? SPEEDTEST_MODE_REVERSE : SPEEDTEST_MODE_FORWARD;
@@ -343,6 +349,10 @@ static void speedtest_start_regular(bool reverse, int16_t left_pwm, int16_t righ
 
 static void speedtest_start_signed(int16_t left_pwm, int16_t right_pwm)
 {
+    if (DriveMode_IsActive()) {
+        LOGI_RELIABLE(LOG_MOD_CLI, "error: stop drive mode before speedtest\r\n");
+        return;
+    }
     memset(&s_speedTest, 0, sizeof(s_speedTest));
     s_speedTest.running = true;
     s_speedTest.mode = SPEEDTEST_MODE_SIGNED;
@@ -405,6 +415,10 @@ static void speedtest_tick(void)
     int32_t right_mmps;
     int32_t ratio_x100;
 
+    if (DriveMode_IsActive()) {
+        s_speedTest.running = false;
+        return;
+    }
     if (!s_speedTest.running) {
         return;
     }
@@ -702,9 +716,16 @@ static void parse_line(char *line)
     } else if (str_eq(line, "path print")) {
         (void)send_path_cmd(PATH_CMD_PRINT);
     } else if (str_eq(line, "path replay")) {
-        (void)send_path_cmd(PATH_CMD_REPLAY);
+        (void)DriveMode_Request(DRIVE_MODE_CMD_START_PATH, pdMS_TO_TICKS(20));
+    } else if (str_eq(line, "path fusion start")) {
+        (void)DriveMode_Request(DRIVE_MODE_CMD_START_PATH_FUSION, pdMS_TO_TICKS(20));
+    } else if (str_eq(line, "path fusion stop")) {
+        (void)DriveMode_Request(DRIVE_MODE_CMD_STOP, pdMS_TO_TICKS(20));
+    } else if (str_eq(line, "path fusion status")) {
+        (void)DriveMode_Request(DRIVE_MODE_CMD_STATUS, pdMS_TO_TICKS(20));
+        (void)send_path_cmd(PATH_CMD_STATUS);
     } else if (str_eq(line, "path stop")) {
-        (void)send_path_cmd(PATH_CMD_STOP);
+        (void)DriveMode_Request(DRIVE_MODE_CMD_STOP, pdMS_TO_TICKS(20));
     } else if (str_eq(line, "path save") || str_eq(line, "path flash save")) {
         (void)send_path_cmd(PATH_CMD_SAVE);
     } else if (str_eq(line, "path load") || str_eq(line, "path flash load")) {
@@ -724,9 +745,9 @@ static void parse_line(char *line)
     } else if (str_eq(line, "grayline status")) {
         (void)send_grayline_cmd(GRAYLINE_CMD_STATUS);
     } else if (str_eq(line, "grayline start")) {
-        (void)send_grayline_cmd(GRAYLINE_CMD_START);
+        (void)DriveMode_Request(DRIVE_MODE_CMD_START_GRAYLINE, pdMS_TO_TICKS(20));
     } else if (str_eq(line, "grayline stop")) {
-        (void)send_grayline_cmd(GRAYLINE_CMD_STOP);
+        (void)DriveMode_Request(DRIVE_MODE_CMD_STOP, pdMS_TO_TICKS(20));
     } else if (str_eq(line, "grayline pid")) {
         (void)send_grayline_cmd(GRAYLINE_CMD_PID);
     } else if (str_eq(line, "speedtest help")) {

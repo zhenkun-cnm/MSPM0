@@ -8,6 +8,7 @@
 #include "app_motor_encoder.h"
 #include "app_motion.h"
 #include "app_tb6612.h"
+#include "app_drive_mode.h"
 #include "dev_tb6612.h"
 #include "port_log.h"
 #include "FreeRTOS.h"
@@ -34,7 +35,7 @@
 
 QueueHandle_t g_grayLineCmdQueue = NULL;
 GrayLine_PidConfig_t g_grayLinePid = {
-    0.024f,
+    0.016f,
     0.0f,
     0.001f,
     0.20f,
@@ -53,6 +54,7 @@ static GrayLine_Status_t s_grayLineStatus = {0};
 
 typedef struct {
     bool running;
+    bool path_assist;
     bool rate_loop_enabled;
     bool last_line_valid;
     bool speed_ref_ready;
@@ -198,6 +200,9 @@ static void grayline_send_motor_cmd(MotorCmdType type, int16_t val, TickType_t w
 
 static void grayline_stop_motors(void)
 {
+    if (!DriveMode_Owns(DRIVE_MODE_GRAYLINE)) {
+        return;
+    }
     grayline_send_motor_cmd(MOTOR_CMD_LEFT_SIGNED_SPEED, 0, pdMS_TO_TICKS(20));
     grayline_send_motor_cmd(MOTOR_CMD_RIGHT_SIGNED_SPEED, 0, pdMS_TO_TICKS(20));
     grayline_send_motor_cmd(MOTOR_CMD_ONOFF, 0, pdMS_TO_TICKS(20));
@@ -205,6 +210,9 @@ static void grayline_stop_motors(void)
 
 static void grayline_drive(int16_t left_pwm, int16_t right_pwm)
 {
+    if (!DriveMode_Owns(DRIVE_MODE_GRAYLINE)) {
+        return;
+    }
     grayline_send_motor_cmd(MOTOR_CMD_LEFT_SIGNED_SPEED, clamp_i16(left_pwm, -100, 100), pdMS_TO_TICKS(2));
     grayline_send_motor_cmd(MOTOR_CMD_RIGHT_SIGNED_SPEED, clamp_i16(right_pwm, -100, 100), pdMS_TO_TICKS(2));
     grayline_send_motor_cmd(MOTOR_CMD_ONOFF, 1, pdMS_TO_TICKS(2));
@@ -491,6 +499,7 @@ static void grayline_start(GrayLine_Runtime_t *rt)
     }
 
     grayline_reset_control(rt);
+    rt->path_assist = false;
     rt->running = true;
     LOGI(LOG_MOD_GRAYLINE, "start\r\n");
 }
@@ -505,6 +514,7 @@ static void grayline_stop(GrayLine_Runtime_t *rt, bool print_msg)
 
     grayline_stop_motors();
     grayline_reset_control(rt);
+    rt->path_assist = false;
     rt->running = false;
     memset(&st, 0, sizeof(st));
     st.rate_loop_enabled = rt->rate_loop_enabled;
@@ -553,6 +563,14 @@ static void grayline_handle_command(GrayLine_Runtime_t *rt, const GrayLine_Comma
                  rt->rate_loop_enabled ? "on" : "off");
             break;
         }
+        case GRAYLINE_CMD_SET_PATH_ASSIST:
+            grayline_stop_motors();
+            grayline_reset_control(rt);
+            rt->path_assist = cmd->path_assist_enabled;
+            rt->running = cmd->path_assist_enabled;
+            LOGI(LOG_MOD_GRAYLINE, "path assist %s\r\n",
+                 rt->path_assist ? "on" : "off");
+            break;
         default:
             LOGE(LOG_MOD_GRAYLINE, "error: bad command\r\n");
             break;
@@ -603,7 +621,12 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     st.running = true;
     st.target_pos = GRAYLINE_TARGET_POS;                           /* 目标位置 = 0（线中心） */
 
-    if (!Gray_ReadSnapshot(&gray)) {                               /* 读取 8 路灰度传感器原始值 */
+    if (!Gray_ReadSnapshot(&gray)) {
+        if (rt->path_assist) {
+            st.path_assist_active = true;
+            grayline_write_status(&st);
+            return;
+        }
         grayline_stop(rt, false);
         return;
     }
@@ -613,6 +636,14 @@ static void grayline_update(GrayLine_Runtime_t *rt)
         rt->last_line_pos = line_pos;                              /* 更新有效位置缓存 */
         rt->last_line_valid = true;
         rt->lost_since_tick = 0U;                                  /* 清零丢线计时 */
+    } else if (rt->path_assist) {
+        st.path_assist_active = true;
+        st.line_fresh = false;
+        st.active_mask = gray.active_mask;
+        st.sample_tick = gray.tick;
+        st.seq = gray.seq;
+        grayline_write_status(&st);
+        return;
     } else if (rt->last_line_valid) {
         line_pos = rt->last_line_pos;                              /* 丢线 → 保持上次有效值 */
         if (rt->lost_since_tick == 0U) {
@@ -641,6 +672,22 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     pos_turn_ff_mps = clamp_f32(pos_turn_ff_mps,                   /* 转弯速度限幅 */
                                 -g_grayLinePid.turn_mps_max,
                                 g_grayLinePid.turn_mps_max);
+
+    if (rt->path_assist) {
+        st.line_valid = true;
+        st.line_fresh = true;
+        st.line_pos = line_pos;
+        st.error = error;
+        st.turn_mps = pos_turn_ff_mps;
+        st.pos_turn_ff_mps = pos_turn_ff_mps;
+        st.path_assist_active = true;
+        st.rate_loop_enabled = rt->rate_loop_enabled;
+        st.active_mask = gray.active_mask;
+        st.sample_tick = gray.tick;
+        st.seq = gray.seq;
+        grayline_write_status(&st);
+        return;
+    }
 
     /* ========== IMU 角速度阻尼环 ========== */
     raw_target_rate_dps = grayline_turn_to_rate_dps(pos_turn_ff_mps);
@@ -739,7 +786,10 @@ static void grayline_update(GrayLine_Runtime_t *rt)
     st.right_pwm = right_pwm;
     st.rate_loop_enabled = rt->rate_loop_enabled;
     st.rate_loop_active = rate_loop_active;
+    st.path_assist_active = false;
+    st.line_fresh = line_valid;
     st.active_mask = gray.active_mask;                             /* 传感器激活位掩码 */
+    st.sample_tick = gray.tick;
     st.seq = gray.seq;                                             /* 传感器帧序号 */
     grayline_write_status(&st);                                    /* 写入全局状态（临界区保护） */
     rt->telemetry_divider++;

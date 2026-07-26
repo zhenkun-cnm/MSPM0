@@ -211,3 +211,14 @@
 - ICM-20608 and LIS3MDL final records include selected I2C address and WHO_AM_I. SDA/SCL state, scans, probes, and ACK listings are DEBUG-only; transfer and initialization failures remain ERROR.
 - Flash now emits one JEDEC/capacity summary and `Flash selftest PASS`; erase/program/readback phases are silent unless an operation fails.
 - Gray receives 154 words (616 bytes), exactly 20% above 128 words (512 bytes). On-target stack report must still show `min_ever >= 2048` bytes.
+
+## 2026-07-26 - Path/gray fusion decisions
+
+- The "inertial direction" for this feature is the target direction and heading correction calculated by `APP/src/app_path.c`, not raw gyro-Z direction.
+- In forward path segments, matching non-zero grayscale and path PWM corrections blend as 80% gray / 20% path. Opposite direction, one-side-straight, stale/no-line, and reverse segments use 100% path correction.
+- The shared motor queue is protected at the APP level by a mode owner check; GrayLine no longer writes motor PWM while it is a path-fusion assistant.
+
+## 2026-07-26 - Fusion startup fallback
+
+- The previous `PATH_STATE_FUSION_ARMING` gate held the vehicle for up to 500 ms waiting for a fresh black-line frame, then raised `PATH_ERROR_GRAY_UNAVAILABLE`.
+- Fusion now starts in `PATH_STATE_REPLAY_TRACK` with diagnostic mode `STALE`; the normal runtime guard is the single source of truth for switching between path-only and blend.

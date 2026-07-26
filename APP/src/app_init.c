@@ -16,6 +16,7 @@
 #include "app_path.h"
 #include "app_gray.h"
 #include "app_gray_line.h"
+#include "app_drive_mode.h"
 #include "app_stack_monitor.h"
 #include "app_test1.h"
 #include "dev_led.h"
@@ -41,6 +42,7 @@
 #define PATH_TASK_STACK_WORDS        384U
 #define GRAY_TASK_STACK_WORDS        154U
 #define GRAYLINE_TASK_STACK_WORDS    192U
+#define DRIVE_MODE_TASK_STACK_WORDS  160U
 #define FLASH_TASK_STACK_WORDS       192U
 #define TEST1_TASK_STACK_WORDS       384U
 
@@ -74,6 +76,7 @@ static TaskHandle_t s_navTaskHandle = NULL;
 static TaskHandle_t s_pathTaskHandle = NULL;
 static TaskHandle_t s_grayTaskHandle = NULL;
 static TaskHandle_t s_grayLineTaskHandle = NULL;
+static TaskHandle_t s_driveModeTaskHandle = NULL;
 static TaskHandle_t s_flashTaskHandle = NULL;
 #if APP_TEST1_ENABLE
 static TaskHandle_t s_test1TaskHandle = NULL;
@@ -147,6 +150,11 @@ static void start_task(void *pvParameters)
     g_grayLineCmdQueue = xQueueCreate(GRAYLINE_CMD_QUEUE_LEN, sizeof(GrayLine_Command_t));
     if (g_grayLineCmdQueue == NULL) {
         LOGE(LOG_MOD_SYS, "grayline cmd queue create failed!\r\n");
+    }
+
+    g_driveModeCmdQueue = xQueueCreate(DRIVE_MODE_CMD_QUEUE_LEN, sizeof(DriveMode_Command_t));
+    if (g_driveModeCmdQueue == NULL) {
+        LOGE(LOG_MOD_SYS, "drive mode queue create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE
@@ -299,6 +307,15 @@ static void start_task(void *pvParameters)
                                    GRAYLINE_TASK_STACK_WORDS);
     } else {
         LOGE(LOG_MOD_SYS, "grayline task create failed!\r\n");
+    }
+
+    if (xTaskCreate(drive_mode_task,
+                    "drive_mode",
+                    DRIVE_MODE_TASK_STACK_WORDS,
+                    NULL,
+                    3,
+                    &s_driveModeTaskHandle) != pdPASS) {
+        LOGE(LOG_MOD_SYS, "drive mode task create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE

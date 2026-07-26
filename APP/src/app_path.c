@@ -6,6 +6,8 @@
 #include "app_ins.h"
 #include "app_motion.h"
 #include "app_tb6612.h"
+#include "app_gray_line.h"
+#include "app_drive_mode.h"
 #include "dev_flash.h"
 #include "port_log.h"
 #include "FreeRTOS.h"
@@ -49,6 +51,11 @@
 #define PATH_TRACK_PWM_MAX           30.0f  /* 最大允许 PWM */
 #define PATH_TRACK_PWM_SLEW          2.0f   /* PWM 缓变率：每 50ms 最大变化量 */
 #define PATH_TRACK_LOG_PERIOD_MS     500U   /* 轨迹跟踪日志输出周期 (ms) */
+#define PATH_FUSION_GRAY_MAX_AGE_MS  30U
+#define PATH_FUSION_MODE_PATH_ONLY   0U
+#define PATH_FUSION_MODE_BLEND       1U
+#define PATH_FUSION_MODE_STALE       2U
+#define PATH_FUSION_MODE_REVERSE     3U
 
 /* ===== Flash 存储 ===== */
 #define PATH_FLASH_START_ADDR        0x000F0000UL  /* Flash 存储起始地址 */
@@ -60,6 +67,11 @@
 
 /* 全局路径命令队列，由 UART 命令处理模块发送命令到此队列 */
 QueueHandle_t g_pathCmdQueue = NULL;
+PathFusion_Config_t g_pathFusionConfig = {
+    0.70f,
+    40.0f,
+    8.0f
+};
 
 /**
  * @brief 路径点数据结构
@@ -97,6 +109,11 @@ typedef struct {
     TickType_t track_near_final_log_tick; /* 上次输出"near final"日志的时刻 */
     bool track_motor_started;          /* 电机是否已启动 */
     bool track_reverse;
+    bool fusion_active;
+    float fusion_gray_trim_pwm;
+    float fusion_path_trim_pwm;
+    float fusion_final_trim_pwm;
+    uint8_t fusion_mode;
 } Path_Runtime_t;
 
 /**
@@ -132,6 +149,13 @@ static void path_status_publish(const Path_Runtime_t *rt,
     s_pathStatus.point_count = s_pathCount;
     s_pathStatus.replay_index = rt->replay_index;
     s_pathStatus.replay_total = s_pathCount;
+    s_pathStatus.fusion_active = rt->fusion_active;
+    s_pathStatus.fusion_gray_ready = rt->fusion_active &&
+                                        (rt->fusion_mode != PATH_FUSION_MODE_STALE);
+    s_pathStatus.fusion_gray_trim_pwm = rt->fusion_gray_trim_pwm;
+    s_pathStatus.fusion_path_trim_pwm = rt->fusion_path_trim_pwm;
+    s_pathStatus.fusion_final_trim_pwm = rt->fusion_final_trim_pwm;
+    s_pathStatus.fusion_mode = rt->fusion_mode;
     if (newResult) {
         s_pathStatus.last_command = command;
         s_pathStatus.result = result;
@@ -338,6 +362,10 @@ static bool path_send_motor_cmd(MotorCmdType type, int16_t val, TickType_t wait_
 
 static void path_track_stop_motors(void)
 {
+    if (!DriveMode_Owns(DRIVE_MODE_PATH) &&
+        !DriveMode_Owns(DRIVE_MODE_PATH_FUSION)) {
+        return;
+    }
     (void)path_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, 0, pdMS_TO_TICKS(20));
     (void)path_send_motor_cmd(MOTOR_CMD_RIGHT_SPEED, 0, pdMS_TO_TICKS(20));
     (void)path_send_motor_cmd(MOTOR_CMD_ONOFF, 0, pdMS_TO_TICKS(20));
@@ -345,6 +373,10 @@ static void path_track_stop_motors(void)
 
 static bool path_track_apply_pwm(int16_t left_pwm, int16_t right_pwm)
 {
+    if (!DriveMode_Owns(DRIVE_MODE_PATH) &&
+        !DriveMode_Owns(DRIVE_MODE_PATH_FUSION)) {
+        return false;
+    }
     if (!path_send_motor_cmd(MOTOR_CMD_LEFT_SPEED, left_pwm, pdMS_TO_TICKS(2))) {
         return false;
     }
@@ -362,6 +394,10 @@ static bool path_track_set_direction(bool reverse)
 
 static bool path_track_start_motors(bool reverse, int16_t left_pwm, int16_t right_pwm)
 {
+    if (!DriveMode_Owns(DRIVE_MODE_PATH) &&
+        !DriveMode_Owns(DRIVE_MODE_PATH_FUSION)) {
+        return false;
+    }
     if (!path_track_set_direction(reverse)) {
         return false;
     }
@@ -757,6 +793,7 @@ static void path_print_help(void)
     LOGI_RELIABLE(LOG_MOD_PATH, "  path record stop\r\n");
     LOGI_RELIABLE(LOG_MOD_PATH, "  path print\r\n");
     LOGI_RELIABLE(LOG_MOD_PATH, "  path replay\r\n");
+    LOGI_RELIABLE(LOG_MOD_PATH, "  path fusion start|stop|status\r\n");
     LOGI_RELIABLE(LOG_MOD_PATH, "  path stop\r\n");
     LOGI_RELIABLE(LOG_MOD_PATH, "  path save\r\n");
     LOGI_RELIABLE(LOG_MOD_PATH, "  path load\r\n");
@@ -781,6 +818,15 @@ static void path_print_status(const Path_Runtime_t *rt)
             (unsigned long)g_motionRtStatus.done_cmd_id,
             (unsigned long)g_motionRtStatus.rejected_cmd_id,
             path_motion_result_name(g_motionRtStatus.last_result));
+    LOGI_RELIABLE(LOG_MOD_PATH, "fusion=%u mode=%u gray=%+.2f path=%+.2f final=%+.2f cfg=%.2f/%.1f/%.1f\r\n",
+            rt->fusion_active ? 1U : 0U,
+            (unsigned)rt->fusion_mode,
+            (double)rt->fusion_gray_trim_pwm,
+            (double)rt->fusion_path_trim_pwm,
+            (double)rt->fusion_final_trim_pwm,
+            (double)g_pathFusionConfig.gray_weight,
+            (double)g_pathFusionConfig.gray_turn_to_pwm,
+            (double)g_pathFusionConfig.gray_trim_max_pwm);
 }
 
 static void path_print_points(void)
@@ -857,6 +903,11 @@ static void path_start_replay(Path_Runtime_t *rt)
     }
 
     rt->state = PATH_STATE_REPLAY_TRACK;
+    rt->fusion_active = false;
+    rt->fusion_mode = PATH_FUSION_MODE_PATH_ONLY;
+    rt->fusion_gray_trim_pwm = 0.0f;
+    rt->fusion_path_trim_pwm = 0.0f;
+    rt->fusion_final_trim_pwm = 0.0f;
     rt->replay_index = 1U;
     rt->track_target_index = 1U;
     rt->track_last_dist_m = 0.0f;
@@ -873,6 +924,43 @@ static void path_start_replay(Path_Runtime_t *rt)
     s_pathOperationOk = true;
 }
 
+static void path_start_fusion(Path_Runtime_t *rt)
+{
+    s_pathOperationOk = false;
+    if (s_pathCount < 2U) {
+        LOGE(LOG_MOD_PATH, "error: need at least 2 points\r\n");
+        return;
+    }
+    if (!path_motion_idle()) {
+        LOGE(LOG_MOD_PATH, "error: motion busy\r\n");
+        return;
+    }
+
+    /* Start tracking immediately. Until a fresh gray sample arrives,
+     * path_update_track() deliberately keeps using the INS path trim only. */
+    rt->state = PATH_STATE_REPLAY_TRACK;
+    rt->replay_index = 1U;
+    rt->track_target_index = 1U;
+    rt->track_last_dist_m = 0.0f;
+    rt->track_last_final_dist_m = 0.0f;
+    rt->track_last_heading_error_deg = 0.0f;
+    rt->track_last_left_pwm = 0;
+    rt->track_last_right_pwm = 0;
+    rt->track_last_log_tick = 0U;
+    rt->track_near_final_log_tick = 0U;
+    rt->track_motor_started = false;
+    rt->track_reverse = false;
+    rt->fusion_active = true;
+    rt->fusion_gray_trim_pwm = 0.0f;
+    rt->fusion_path_trim_pwm = 0.0f;
+    rt->fusion_final_trim_pwm = 0.0f;
+    rt->fusion_mode = PATH_FUSION_MODE_STALE;
+    path_reset_motion_wait(rt);
+    LOGI(LOG_MOD_PATH, "fusion start count=%u path-only until gray fresh\r\n",
+         (unsigned)s_pathCount);
+    s_pathOperationOk = true;
+}
+
 static void path_stop(Path_Runtime_t *rt)
 {
     (void)path_send_motion_raw(MOTION_CMD_STOP, 0.0f, 0U);
@@ -881,6 +969,8 @@ static void path_stop(Path_Runtime_t *rt)
     path_reset_motion_wait(rt);
     rt->track_motor_started = false;
     rt->track_reverse = false;
+    rt->fusion_active = false;
+    rt->fusion_mode = PATH_FUSION_MODE_PATH_ONLY;
     rt->track_last_left_pwm = 0;
     rt->track_last_right_pwm = 0;
     rt->track_last_final_dist_m = 0.0f;
@@ -929,6 +1019,14 @@ static void path_handle_command(Path_Runtime_t *rt, const Path_Command_t *cmd)
             break;
         case PATH_CMD_REPLAY:
             path_start_replay(rt);
+            path_status_publish(rt, cmd->type,
+                                s_pathOperationOk ? PATH_RESULT_RUNNING : PATH_RESULT_ERROR,
+                                s_pathOperationOk ? PATH_ERROR_NONE :
+                                ((s_pathCount < 2U) ? PATH_ERROR_TOO_SHORT : PATH_ERROR_MOTION_BUSY),
+                                true);
+            break;
+        case PATH_CMD_FUSION_START:
+            path_start_fusion(rt);
             path_status_publish(rt, cmd->type,
                                 s_pathOperationOk ? PATH_RESULT_RUNNING : PATH_RESULT_ERROR,
                                 s_pathOperationOk ? PATH_ERROR_NONE :
@@ -1057,6 +1155,9 @@ static void path_update_track(Path_Runtime_t *rt)
     float segment_body_error_deg;                         /*!< 路段位移方向与录制时车身朝向的夹角 (deg) */
     float trim_raw;                                       /*!< 未经限幅的差速修正量 (PWM) */
     float trim;                                           /*!< 限幅后的差速修正量 (PWM)，范围 [-8, 8] */
+    float gray_trim = 0.0f;
+    float path_trim;
+    GrayLine_Status_t gray_status;
     float left_pwm_raw;                                   /*!< 未限幅的左轮目标 PWM */
     float right_pwm_raw;                                  /*!< 未限幅的右轮目标 PWM */
     float left_pwm_f;                                     /*!< 缓变后的左轮 PWM（浮点中间值） */
@@ -1182,6 +1283,33 @@ static void path_update_track(Path_Runtime_t *rt)
     trim = path_clamp_f32(trim_raw,
                           -PATH_TRACK_TRIM_MAX,
                           PATH_TRACK_TRIM_MAX);
+
+    path_trim = trim;
+    rt->fusion_path_trim_pwm = path_trim;
+    rt->fusion_gray_trim_pwm = 0.0f;
+    rt->fusion_final_trim_pwm = path_trim;
+    rt->fusion_mode = PATH_FUSION_MODE_PATH_ONLY;
+    if (rt->fusion_active) {
+        if (reverse_segment) {
+            rt->fusion_mode = PATH_FUSION_MODE_REVERSE;
+        } else if (GrayLine_ReadStatus(&gray_status) &&
+                   gray_status.path_assist_active && gray_status.line_fresh &&
+                   (((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) -
+                     gray_status.sample_tick) <= PATH_FUSION_GRAY_MAX_AGE_MS)) {
+            gray_trim = path_clamp_f32(gray_status.pos_turn_ff_mps *
+                                       g_pathFusionConfig.gray_turn_to_pwm,
+                                       -g_pathFusionConfig.gray_trim_max_pwm,
+                                       g_pathFusionConfig.gray_trim_max_pwm);
+            rt->fusion_gray_trim_pwm = gray_trim;
+            trim = (g_pathFusionConfig.gray_weight * gray_trim) +
+                   ((1.0f - g_pathFusionConfig.gray_weight) * path_trim);
+            trim = path_clamp_f32(trim, -PATH_TRACK_TRIM_MAX, PATH_TRACK_TRIM_MAX);
+            rt->fusion_mode = PATH_FUSION_MODE_BLEND;
+        } else {
+            rt->fusion_mode = PATH_FUSION_MODE_STALE;
+        }
+        rt->fusion_final_trim_pwm = trim;
+    }
 
     direction_changed = rt->track_motor_started && (rt->track_reverse != reverse_segment);
 

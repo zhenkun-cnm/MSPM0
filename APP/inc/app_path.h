@@ -26,7 +26,8 @@ typedef enum {
     PATH_CMD_REPLAY,
     PATH_CMD_STOP,
     PATH_CMD_SAVE,
-    PATH_CMD_LOAD
+    PATH_CMD_LOAD,
+    PATH_CMD_FUSION_START
 } Path_CommandType_t;
 
 typedef struct {
@@ -64,6 +65,12 @@ typedef enum {
 } Path_Error_t;
 
 typedef struct {
+    float gray_weight;
+    float gray_turn_to_pwm;
+    float gray_trim_max_pwm;
+} PathFusion_Config_t;
+
+typedef struct {
     Path_State_t       state;
     Path_CommandType_t last_command;
     Path_Result_t      result;
@@ -71,10 +78,17 @@ typedef struct {
     uint16_t           point_count;
     uint16_t           replay_index;
     uint16_t           replay_total;
+    bool               fusion_active;
+    bool               fusion_gray_ready;
+    float              fusion_gray_trim_pwm;
+    float              fusion_path_trim_pwm;
+    float              fusion_final_trim_pwm;
+    uint8_t            fusion_mode;
     uint32_t           sequence;
 } Path_RuntimeStatus_t;
 
 extern QueueHandle_t g_pathCmdQueue;
+extern PathFusion_Config_t g_pathFusionConfig;
 
 bool Path_Status_Read(Path_RuntimeStatus_t *out);
 void path_task(void *pvParameters);

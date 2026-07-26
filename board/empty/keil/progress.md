@@ -288,3 +288,19 @@
 - [x] Set Gray stack and monitor default to 154 words (+104 bytes).
 - [x] Keil clean rebuild: 0 errors, 0 warnings (Code=101576, RO=16628, RW=440, ZI=30056).
 - [ ] On target: cold boot and 100-second stack report; require Gray total=154 words and `min_ever >= 2048` bytes.
+
+## 2026-07-26 - Three-mode path/gray fusion
+
+- [x] Added `app_drive_mode` as the exclusive APP control-mode coordinator: `IDLE`, `GRAYLINE`, `PATH`, and `PATH_FUSION`.
+- [x] Added `path fusion start|stop|status`, TFT `INS -> Fusion Start/Fusion Stop`, and `PID -> PathFusion` runtime parameters.
+- [x] Made GrayLine a non-driving 100 Hz path-assist source during fusion; `app_path` owns the fused motor PWM.
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108792, RO=17680, RW=512, ZI=30080).
+- [ ] On target: validate gray → path → fusion → stop → gray transitions, conflict fallback, stale-line fallback, reverse path fallback, and TFT tuning.
+
+## 2026-07-26 - Fusion startup path-only fallback
+
+- [x] Removed the fresh-black-line startup wait and timeout error from `app_path`.
+- [x] `path fusion start` now immediately starts path replay with `fusion_mode=STALE`; valid gray samples can join dynamically.
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108600, RO=17660, RW=512, ZI=30080).
+- [ ] On target: start Fusion with no black line and confirm immediate `REPLAY_TRACK` motor output; then introduce a valid line and confirm `BLEND` only when directions agree.
+- Note: one initial inspection command had a PowerShell `${variable}:` interpolation parse error; the retry succeeded and no source files were changed by that failed command.

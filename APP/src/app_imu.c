@@ -14,6 +14,9 @@
 #include "semphr.h"
 #include <math.h>
 
+/* I2C initialization must retain the known-good compiler behavior. */
+#pragma clang optimize off
+
 #define IMU_TASK_STACK_SIZE      448
 #define IMU_TASK_PRIORITY        (4)
 #define IMU_TASK_PERIOD_MS       10

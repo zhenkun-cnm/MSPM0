@@ -59,7 +59,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_TB6612_ENB_init();
     SYSCFG_DL_I2C_0_init();
     SYSCFG_DL_sys_uart_init();
-    SYSCFG_DL_UART_0_init();
+    SYSCFG_DL_car_uart_init();
     SYSCFG_DL_W25Q64_init();
     SYSCFG_DL_DMA_init();
     SYSCFG_DL_SYSTICK_init();
@@ -107,7 +107,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_TimerG_reset(TB6612_ENB_INST);
     DL_I2C_reset(I2C_0_INST);
     DL_UART_Main_reset(sys_uart_INST);
-    DL_UART_Main_reset(UART_0_INST);
+    DL_UART_Main_reset(car_uart_INST);
     DL_SPI_reset(W25Q64_INST);
 
 
@@ -119,7 +119,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_TimerG_enablePower(TB6612_ENB_INST);
     DL_I2C_enablePower(I2C_0_INST);
     DL_UART_Main_enablePower(sys_uart_INST);
-    DL_UART_Main_enablePower(UART_0_INST);
+    DL_UART_Main_enablePower(car_uart_INST);
     DL_SPI_enablePower(W25Q64_INST);
 
 
@@ -173,9 +173,9 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
 		 DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
     DL_GPIO_initPeripheralOutputFunction(
-        GPIO_UART_0_IOMUX_TX, GPIO_UART_0_IOMUX_TX_FUNC);
+        GPIO_car_uart_IOMUX_TX, GPIO_car_uart_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
-        GPIO_UART_0_IOMUX_RX, GPIO_UART_0_IOMUX_RX_FUNC);
+        GPIO_car_uart_IOMUX_RX, GPIO_car_uart_IOMUX_RX_FUNC);
 
     DL_GPIO_initPeripheralOutputFunction(
         GPIO_W25Q64_IOMUX_SCLK, GPIO_W25Q64_IOMUX_SCLK_FUNC);
@@ -599,12 +599,12 @@ SYSCONFIG_WEAK void SYSCFG_DL_sys_uart_init(void)
 
     DL_UART_Main_enable(sys_uart_INST);
 }
-static const DL_UART_Main_ClockConfig gUART_0ClockConfig = {
+static const DL_UART_Main_ClockConfig gcar_uartClockConfig = {
     .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
     .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
 };
 
-static const DL_UART_Main_Config gUART_0Config = {
+static const DL_UART_Main_Config gcar_uartConfig = {
     .mode        = DL_UART_MAIN_MODE_NORMAL,
     .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
     .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
@@ -613,22 +613,30 @@ static const DL_UART_Main_Config gUART_0Config = {
     .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
 };
 
-SYSCONFIG_WEAK void SYSCFG_DL_UART_0_init(void)
+SYSCONFIG_WEAK void SYSCFG_DL_car_uart_init(void)
 {
-    DL_UART_Main_setClockConfig(UART_0_INST, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);
+    DL_UART_Main_setClockConfig(car_uart_INST, (DL_UART_Main_ClockConfig *) &gcar_uartClockConfig);
 
-    DL_UART_Main_init(UART_0_INST, (DL_UART_Main_Config *) &gUART_0Config);
+    DL_UART_Main_init(car_uart_INST, (DL_UART_Main_Config *) &gcar_uartConfig);
     /*
      * Configure baud rate by setting oversampling and baud rate divisors.
-     *  Target baud rate: 9600
-     *  Actual baud rate: 9599.81
+     *  Target baud rate: 115200
+     *  Actual baud rate: 115190.78
      */
-    DL_UART_Main_setOversampling(UART_0_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(UART_0_INST, UART_0_IBRD_40_MHZ_9600_BAUD, UART_0_FBRD_40_MHZ_9600_BAUD);
+    DL_UART_Main_setOversampling(car_uart_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(car_uart_INST, car_uart_IBRD_40_MHZ_115200_BAUD, car_uart_FBRD_40_MHZ_115200_BAUD);
 
 
+    /* Configure Interrupts */
+    DL_UART_Main_enableInterrupt(car_uart_INST,
+                                 DL_UART_MAIN_INTERRUPT_RX);
 
-    DL_UART_Main_enable(UART_0_INST);
+    /* Configure FIFOs */
+    DL_UART_Main_enableFIFOs(car_uart_INST);
+    DL_UART_Main_setRXFIFOThreshold(car_uart_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+    DL_UART_Main_setTXFIFOThreshold(car_uart_INST, DL_UART_TX_FIFO_LEVEL_ONE_ENTRY);
+
+    DL_UART_Main_enable(car_uart_INST);
 }
 
 static const DL_SPI_Config gW25Q64_config = {
@@ -653,7 +661,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_W25Q64_init(void) {
     /*
      * Set the bit rate clock divider to generate the serial output clock
      *     outputBitRate = (spiInputClock) / ((1 + SCR) * 2)
-     *     8000000 = (80000000)/((1 + 4) * 2)
+     *     20000000 = (80000000)/((1 + 1) * 2)
      */
     DL_SPI_setBitRateSerialClockDivider(W25Q64_INST, 1);
     /* Set RX and TX FIFO threshold levels */

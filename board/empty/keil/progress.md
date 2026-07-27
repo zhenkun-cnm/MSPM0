@@ -304,3 +304,20 @@
 - [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108600, RO=17660, RW=512, ZI=30080).
 - [ ] On target: start Fusion with no black line and confirm immediate `REPLAY_TRACK` motor output; then introduce a valid line and confirm `BLEND` only when directions agree.
 - Note: one initial inspection command had a PowerShell `${variable}:` interpolation parse error; the retry succeeded and no source files were changed by that failed command.
+
+## 2026-07-27 - UART2 hardware-only reconstruction checkpoint
+
+- [x] Branch `codex/uart2-rebuild-from-fusion` created from `f315d2f`; previous worktree preserved in stash.
+- [x] SysConfig regenerated for UART2 PB17/PB18, 115200, RX FIFO threshold one byte.
+- [x] Port UART2 transport compiled, with no APP communication task/queue and no UART2 NVIC enable.
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108600, RO=17616, RW=508, ZI=30228).
+- [ ] On target: verify ICM on download, reset, and full power cycle before continuing.
+
+## 2026-07-27 - UART2 communication runtime
+
+- [x] Hardware-only UART2 checkpoint passed on target.
+- [x] Restored protocol task, two-entry queues, UART2 IRQ enable, stack monitor registration, and UART0 `comm` commands.
+- [x] ICM/I2C files retained from fusion baseline; startup sources are excluded from size optimization.
+- [x] Heap=20 KiB, path capacity=160, delayed Flash/monitor task creation enabled.
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=94280, RO=15748, RW=508, ZI=30868).
+- [ ] On target: test ICM reset/cold boot plus bidirectional communication.

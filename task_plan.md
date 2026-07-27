@@ -532,3 +532,24 @@ Status: implemented and Keil rebuild verified; on-target validation pending.
 
 - `path fusion start` enters continuous `app_path` tracking immediately, even when no black line has been detected.
 - Fresh grayscale data remains optional: it enables the existing forward/same-direction blend; no-line, stale, conflict, or reverse operation remains path-only without stopping the vehicle.
+
+## 2026-07-27 - UART2 incremental reconstruction
+
+Status: paused after hardware-only stage; awaiting on-target validation.
+
+- Rebuild starts from the known-good fusion commit `f315d2f`; the previous UART2/ICM investigation worktree is preserved in Git stash `pre-uart2-rebuild-2026-07-27`.
+- Stage 2 changes only SysConfig and the Device/Port UART2 transport declarations: UART2 PB17 TX, PB18 RX, 115200 8N1, RX FIFO threshold one byte.
+- No APP communication queue/task exists in this image, and `NVIC_EnableIRQ(UART2_INT_IRQn)` is deliberately absent. IMU startup, I2C0 PA0/PA1 configuration, priorities, and heap remain the fusion baseline.
+- Clean Keil rebuild passed: Code=108600, RO-data=17616, RW-data=508, ZI-data=30228; 0 errors, 0 warnings.
+- Next action is user on-target verification for download, reset, and power-cycle ICM initialization. Do not add communication runtime code until this checkpoint passes.
+
+## 2026-07-27 - UART2 communication runtime restored
+
+Status: clean-build verified; on-target verification pending.
+
+- Hardware-only checkpoint passed on target, so the communication protocol, UART2 IRQ enable from `car_comm_task`, two-entry TX/RX queues, ACK/retry logic, and UART0 `comm` commands are now enabled.
+- ICM files remain the fusion baseline. `app_imu.c` and `app_init.c` explicitly disable clang size optimization; `port_imu.c` and `port_lis3mdl.c` remain outside optimized groups.
+- The target-wide compiler option remains empty. `-Oz` is limited to `App/Src` and `Algorithm/Src` groups to fit Flash without optimizing the I2C startup path.
+- Heap is 20 KiB, path capacity is 160 points, and Flash/stack monitor tasks start after a 100 ms software-timer delay.
+- Clean Keil rebuild passed: Code=94280, RO-data=15748, RW-data=508, ZI-data=30868; 0 errors, 0 warnings.
+- Next action: test ICM across download/reset/power cycle and test bidirectional `comm ping`, `comm send`, `comm recv`, and `comm status` with two vehicles.

@@ -26,11 +26,12 @@ static StackMonEntry s_tasks[APP_STACK_MON_COUNT] = {
     [APP_STACK_MON_IMU]       = { "imu_task",     NULL, 448 },
     [APP_STACK_MON_INS]       = { "ins",          NULL, 288 },
     [APP_STACK_MON_INS_CMD]   = { "ins_cmd",      NULL, 256 },
+    [APP_STACK_MON_CAR_COMM]  = { "car_comm",     NULL, 192 },
     [APP_STACK_MON_MOTION]    = { "motion",       NULL, 192 },
     [APP_STACK_MON_NAV]       = { "nav",          NULL, 160 },
     [APP_STACK_MON_PATH]      = { "path",         NULL, 384 },
     [APP_STACK_MON_GRAY]      = { "gray",         NULL, 154 },
-    [APP_STACK_MON_GRAYLINE]  = { "grayline",     NULL, 192 },
+    [APP_STACK_MON_GRAYLINE]  = { "grayline",     NULL, 250 },
     [APP_STACK_MON_FLASH]     = { "flash_test",   NULL, 192 },
     [APP_STACK_MON_MONITOR]   = { "stack_mon",    NULL, MONITOR_STACK_DEPTH },
 };
@@ -133,7 +134,8 @@ void app_stack_monitor_start(void)
                                     1,
                                     &handle);
     if (status != pdPASS) {
-        LOGE(LOG_MOD_SYS, "monitor task create failed\r\n");
+        LOGE(LOG_MOD_SYS, "monitor task create failed, heap_free=%lu\r\n",
+             (unsigned long)xPortGetFreeHeapSize());
     } else {
         app_stack_monitor_set_task(APP_STACK_MON_MONITOR,
                                    handle,

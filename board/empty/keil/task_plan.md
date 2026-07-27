@@ -355,3 +355,22 @@ Status: implemented and Keil rebuild verified; on-target validation pending.
 
 - `path fusion start` enters continuous `app_path` tracking immediately, even when no black line has been detected.
 - Fresh grayscale data remains optional: it enables the existing forward/same-direction blend; no-line, stale, conflict, or reverse operation remains path-only without stopping the vehicle.
+
+## 2026-07-27 - UART2 incremental reconstruction
+
+Status: paused after hardware-only stage; awaiting on-target validation.
+
+- Rebuild starts from known-good fusion commit `f315d2f`; previous UART2/ICM worktree is preserved in Git stash `pre-uart2-rebuild-2026-07-27`.
+- Stage 2 changes only UART2 hardware: PB17 TX, PB18 RX, 115200 8N1, RX FIFO threshold one byte.
+- No communication task/queue exists and UART2 NVIC is deliberately not enabled. I2C0 PA0/PA1 and IMU startup remain the fusion baseline.
+- Clean Keil rebuild passed: Code=108600, RO-data=17616, RW-data=508, ZI-data=30228; 0 errors, 0 warnings.
+
+## 2026-07-27 - UART2 communication runtime restored
+
+Status: clean-build verified; on-target verification pending.
+
+- Hardware-only checkpoint passed, so two-entry queues, protocol task, UART2 IRQ enable, and UART0 `comm` commands are restored.
+- ICM files remain the fusion baseline. `app_imu.c` and `app_init.c` explicitly disable clang size optimization.
+- `-Oz` is limited to App and Algorithm groups; the target/global option is empty and Port I2C files remain default optimized.
+- Heap=20 KiB, path capacity=160, and Flash/monitor startup is delayed 100 ms.
+- Clean Keil rebuild: Code=94280, RO=15748, RW=508, ZI=30868; 0 errors, 0 warnings.

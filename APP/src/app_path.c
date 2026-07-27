@@ -21,7 +21,7 @@
 #define PATH_TASK_PERIOD_MS          50U    /* 任务调度周期 (ms) */
 
 /* ===== 路径录制 ===== */
-#define PATH_MAX_POINTS              292U   /* 日志 DMA 静态 RAM 后仍净释放至少 2 KiB */
+#define PATH_MAX_POINTS              160U   /* 为通信、Flash 测试和监控任务预留 RAM */
 #define PATH_RECORD_MIN_DIST_M       0.05f  /* 触发新录点的最小位置变化 (m) */
 #define PATH_RECORD_MIN_YAW_DEG      5.0f   /* 触发新录点的最小朝向变化 (deg) */
 

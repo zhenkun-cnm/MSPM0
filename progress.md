@@ -453,3 +453,20 @@ if (ret == pdPASS) {
 - [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108600, RO=17660, RW=512, ZI=30080).
 - [ ] On target: start Fusion with no black line and confirm immediate `REPLAY_TRACK` motor output; then introduce a valid line and confirm `BLEND` only when directions agree.
 - Note: one initial inspection command had a PowerShell `${variable}:` interpolation parse error; the retry succeeded and no source files were changed by that failed command.
+
+## 2026-07-27 - UART2 hardware-only reconstruction checkpoint
+
+- [x] Preserved the previous UART2/ICM investigation worktree in Git stash `pre-uart2-rebuild-2026-07-27` and created `codex/uart2-rebuild-from-fusion` from known-good fusion commit `f315d2f`.
+- [x] Regenerated SysConfig for UART2: PB17 TX, PB18 RX, 115200 8N1, RX FIFO one-byte threshold, RX peripheral interrupt source.
+- [x] Added the Device/Port UART2 transport files and Keil source registration; no APP communication code, task, queue, or UART2 NVIC enable is present.
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108600, RO=17616, RW=508, ZI=30228).
+- [ ] On target: test download, MCU reset, and full power-cycle ICM initialization before proceeding to the communication runtime stage.
+
+## 2026-07-27 - UART2 communication runtime
+
+- [x] Hardware-only UART2 checkpoint passed on target.
+- [x] Restored framed two-vehicle protocol, two-entry TX/RX queues, ACK/retry handling, UART2 RX interrupt enable from the communication task, stack monitor registration, and UART0 `comm` commands.
+- [x] Retained normal fusion ICM/I2C files; `app_imu.c` and `app_init.c` are excluded from clang size optimization.
+- [x] Restored 20 KiB heap, 160-point path capacity, and delayed Flash/monitor startup to avoid task-creation failures.
+- [x] Keil clean rebuild: 0 errors, 0 warnings (Code=94280, RO=15748, RW=508, ZI=30868).
+- [ ] On target: test ICM after download/reset/power cycle; then test bidirectional ping, send/receive, ACK retry, and `comm status`.

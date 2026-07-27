@@ -11,6 +11,7 @@
 #include "app_motor_encoder.h"
 #include "app_ins.h"
 #include "app_ins_cmd.h"
+#include "app_car_comm.h"
 #include "app_motion.h"
 #include "app_nav.h"
 #include "app_path.h"
@@ -28,7 +29,11 @@
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
+#include "timers.h"
 #include <stdio.h>
+
+/* Keep startup and task creation on the known-good non-size-optimized path. */
+#pragma clang optimize off
 
 #define START_TASK_STACK_WORDS       256U
 #define ENCODER_TASK_STACK_WORDS     140U
@@ -37,14 +42,16 @@
 #define MOTOR_ENC_TASK_STACK_WORDS   256U
 #define INS_TASK_STACK_WORDS         288U
 #define INS_CMD_TASK_STACK_WORDS     256U
+#define CAR_COMM_TASK_STACK_WORDS    192U
 #define MOTION_TASK_STACK_WORDS      192U
 #define NAV_TASK_STACK_WORDS         160U
 #define PATH_TASK_STACK_WORDS        384U
 #define GRAY_TASK_STACK_WORDS        154U
-#define GRAYLINE_TASK_STACK_WORDS    192U
+#define GRAYLINE_TASK_STACK_WORDS    250U
 #define DRIVE_MODE_TASK_STACK_WORDS  160U
 #define FLASH_TASK_STACK_WORDS       192U
 #define TEST1_TASK_STACK_WORDS       384U
+#define DEFERRED_START_DELAY_MS       100U
 
 QueueHandle_t g_menuEvtQueue = NULL;
 
@@ -71,6 +78,7 @@ static TaskHandle_t s_tb6612TaskHandle = NULL;
 static TaskHandle_t s_motorEncoderTaskHandle = NULL;
 static TaskHandle_t s_insTaskHandle = NULL;
 static TaskHandle_t s_insCmdTaskHandle = NULL;
+static TaskHandle_t s_carCommTaskHandle = NULL;
 static TaskHandle_t s_motionTaskHandle = NULL;
 static TaskHandle_t s_navTaskHandle = NULL;
 static TaskHandle_t s_pathTaskHandle = NULL;
@@ -78,11 +86,14 @@ static TaskHandle_t s_grayTaskHandle = NULL;
 static TaskHandle_t s_grayLineTaskHandle = NULL;
 static TaskHandle_t s_driveModeTaskHandle = NULL;
 static TaskHandle_t s_flashTaskHandle = NULL;
+static TimerHandle_t s_deferredStartTimer = NULL;
 #if APP_TEST1_ENABLE
 static TaskHandle_t s_test1TaskHandle = NULL;
 #endif
 
 static void start_task(void *pvParameters);
+static void start_deferred_tasks(TimerHandle_t timer);
+static void schedule_deferred_tasks(void);
 
 void app_init(void)
 {
@@ -155,6 +166,10 @@ static void start_task(void *pvParameters)
     g_driveModeCmdQueue = xQueueCreate(DRIVE_MODE_CMD_QUEUE_LEN, sizeof(DriveMode_Command_t));
     if (g_driveModeCmdQueue == NULL) {
         LOGE(LOG_MOD_SYS, "drive mode queue create failed!\r\n");
+    }
+
+    if (!CarComm_Init()) {
+        LOGE(LOG_MOD_SYS, "car comm queue create failed!\r\n");
     }
 
 #if APP_TEST1_ENABLE
@@ -244,6 +259,19 @@ static void start_task(void *pvParameters)
         LOGE(LOG_MOD_SYS, "INS cmd task create failed!\r\n");
     }
 
+    if (xTaskCreate(car_comm_task,
+                    "car_comm",
+                    CAR_COMM_TASK_STACK_WORDS,
+                    NULL,
+                    2,
+                    &s_carCommTaskHandle) == pdPASS) {
+        app_stack_monitor_set_task(APP_STACK_MON_CAR_COMM,
+                                   s_carCommTaskHandle,
+                                   CAR_COMM_TASK_STACK_WORDS);
+    } else {
+        LOGE(LOG_MOD_SYS, "car comm task create failed!\r\n");
+    }
+
     if (xTaskCreate(motion_task,
                     "motion",
                     MOTION_TASK_STACK_WORDS,
@@ -322,13 +350,28 @@ static void start_task(void *pvParameters)
     if (xTaskCreate(test1_task,
                     "test1",
                     TEST1_TASK_STACK_WORDS,
-                    NULL,¡¤
+                    NULL,
                     2,
                     &s_test1TaskHandle) == pdPASS) {
     } else {
         LOGE(LOG_MOD_SYS, "test1 task create failed!\r\n");
     }
 #endif
+
+    schedule_deferred_tasks();
+
+    LOGI_INIT(LOG_MOD_SYS, "Worker tasks created; deferred tasks scheduled\r\n");
+
+    taskEXIT_CRITICAL();
+
+    app_stack_monitor_clear_task(APP_STACK_MON_START);
+    vTaskDelete(NULL);
+}
+
+static void start_deferred_tasks(TimerHandle_t timer)
+{
+    (void)xTimerDelete(timer, 0U);
+    s_deferredStartTimer = NULL;
 
     if (xTaskCreate(flash_init_task,
                     "flash_test",
@@ -340,15 +383,31 @@ static void start_task(void *pvParameters)
                                    s_flashTaskHandle,
                                    FLASH_TASK_STACK_WORDS);
     } else {
-        LOGE(LOG_MOD_SYS, "flash test task create failed!\r\n");
+        LOGE(LOG_MOD_SYS, "flash test task create failed, heap_free=%lu\r\n",
+             (unsigned long)xPortGetFreeHeapSize());
     }
 
     app_stack_monitor_start();
+    LOGI_INIT(LOG_MOD_SYS, "Deferred worker tasks created\r\n");
+}
 
-    LOGI_INIT(LOG_MOD_SYS, "Worker tasks created\r\n");
+static void schedule_deferred_tasks(void)
+{
+    s_deferredStartTimer = xTimerCreate("late_start",
+                                        pdMS_TO_TICKS(DEFERRED_START_DELAY_MS),
+                                        pdFALSE,
+                                        NULL,
+                                        start_deferred_tasks);
+    if (s_deferredStartTimer == NULL) {
+        LOGE(LOG_MOD_SYS, "deferred start timer create failed, heap_free=%lu\r\n",
+             (unsigned long)xPortGetFreeHeapSize());
+        return;
+    }
 
-    taskEXIT_CRITICAL();
-
-    app_stack_monitor_clear_task(APP_STACK_MON_START);
-    vTaskDelete(NULL);
+    if (xTimerStart(s_deferredStartTimer, 0U) != pdPASS) {
+        LOGE(LOG_MOD_SYS, "deferred start timer start failed, heap_free=%lu\r\n",
+             (unsigned long)xPortGetFreeHeapSize());
+        (void)xTimerDelete(s_deferredStartTimer, 0U);
+        s_deferredStartTimer = NULL;
+    }
 }

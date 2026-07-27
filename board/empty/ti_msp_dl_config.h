@@ -180,22 +180,22 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define sys_uart_BAUD_RATE                                              (115200)
 #define sys_uart_IBRD_40_MHZ_115200_BAUD                                    (21)
 #define sys_uart_FBRD_40_MHZ_115200_BAUD                                    (45)
-/* Defines for UART_0 */
-#define UART_0_INST                                                        UART1
-#define UART_0_INST_FREQUENCY                                           40000000
-#define UART_0_INST_IRQHandler                                  UART1_IRQHandler
-#define UART_0_INST_INT_IRQN                                      UART1_INT_IRQn
-#define GPIO_UART_0_RX_PORT                                                GPIOA
-#define GPIO_UART_0_TX_PORT                                                GPIOA
-#define GPIO_UART_0_RX_PIN                                        DL_GPIO_PIN_18
-#define GPIO_UART_0_TX_PIN                                        DL_GPIO_PIN_17
-#define GPIO_UART_0_IOMUX_RX                                     (IOMUX_PINCM40)
-#define GPIO_UART_0_IOMUX_TX                                     (IOMUX_PINCM39)
-#define GPIO_UART_0_IOMUX_RX_FUNC                      IOMUX_PINCM40_PF_UART1_RX
-#define GPIO_UART_0_IOMUX_TX_FUNC                      IOMUX_PINCM39_PF_UART1_TX
-#define UART_0_BAUD_RATE                                                  (9600)
-#define UART_0_IBRD_40_MHZ_9600_BAUD                                       (260)
-#define UART_0_FBRD_40_MHZ_9600_BAUD                                        (27)
+/* Defines for car_uart */
+#define car_uart_INST                                                      UART2
+#define car_uart_INST_FREQUENCY                                         40000000
+#define car_uart_INST_IRQHandler                                UART2_IRQHandler
+#define car_uart_INST_INT_IRQN                                    UART2_INT_IRQn
+#define GPIO_car_uart_RX_PORT                                              GPIOB
+#define GPIO_car_uart_TX_PORT                                              GPIOB
+#define GPIO_car_uart_RX_PIN                                      DL_GPIO_PIN_18
+#define GPIO_car_uart_TX_PIN                                      DL_GPIO_PIN_17
+#define GPIO_car_uart_IOMUX_RX                                   (IOMUX_PINCM44)
+#define GPIO_car_uart_IOMUX_TX                                   (IOMUX_PINCM43)
+#define GPIO_car_uart_IOMUX_RX_FUNC                    IOMUX_PINCM44_PF_UART2_RX
+#define GPIO_car_uart_IOMUX_TX_FUNC                    IOMUX_PINCM43_PF_UART2_TX
+#define car_uart_BAUD_RATE                                              (115200)
+#define car_uart_IBRD_40_MHZ_115200_BAUD                                    (21)
+#define car_uart_FBRD_40_MHZ_115200_BAUD                                    (45)
 
 
 
@@ -327,7 +327,7 @@ void SYSCFG_DL_TB6612_ENA_init(void);
 void SYSCFG_DL_TB6612_ENB_init(void);
 void SYSCFG_DL_I2C_0_init(void);
 void SYSCFG_DL_sys_uart_init(void);
-void SYSCFG_DL_UART_0_init(void);
+void SYSCFG_DL_car_uart_init(void);
 void SYSCFG_DL_W25Q64_init(void);
 void SYSCFG_DL_DMA_init(void);
 

@@ -306,3 +306,15 @@ start_task:
 
 - The previous `PATH_STATE_FUSION_ARMING` gate held the vehicle for up to 500 ms waiting for a fresh black-line frame, then raised `PATH_ERROR_GRAY_UNAVAILABLE`.
 - Fusion now starts in `PATH_STATE_REPLAY_TRACK` with diagnostic mode `STALE`; the normal runtime guard is the single source of truth for switching between path-only and blend.
+
+## 2026-07-27 - UART2/ICM isolation checkpoint
+
+- The prior failing ICM status `0x00010026` contains `ERR` and `ADRACK`: I2C0 sent an address but the ICM did not acknowledge it. This occurs before a `WHO_AM_I` register read.
+- Static comparison with the known-good fusion commit found I2C0 PA0/PA1, 400 kHz timing, the ICM driver, LIS3MDL driver, and IMU priority unchanged. The first reconstruction checkpoint therefore changes only UART2 hardware configuration.
+- UART2 is configured on PB17/PB18, but its NVIC line is not enabled and no communication task can access it. A result at this checkpoint distinguishes UART2 peripheral/SysConfig effects from queue, task, heap, and protocol effects.
+
+## 2026-07-27 - Size-optimization boundary
+
+- Adding the full communication runtime at baseline optimization exceeded the 128 KiB Flash region by 0xF88 (3976 bytes).
+- `-Oz` applied only to Algorithm and general App source groups reduces the final Flash image to 110536 bytes (84.3%). The target/global option remains unset.
+- `#pragma clang optimize off` is accepted with no compiler warning in `app_imu.c` and `app_init.c`; ICM port files stay in the default Port group. Therefore the boot-time I2C path does not use the size-optimized application or algorithm compilation settings.

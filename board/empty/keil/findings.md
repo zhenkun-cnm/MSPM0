@@ -222,3 +222,15 @@
 
 - The previous `PATH_STATE_FUSION_ARMING` gate held the vehicle for up to 500 ms waiting for a fresh black-line frame, then raised `PATH_ERROR_GRAY_UNAVAILABLE`.
 - Fusion now starts in `PATH_STATE_REPLAY_TRACK` with diagnostic mode `STALE`; the normal runtime guard is the single source of truth for switching between path-only and blend.
+
+## 2026-07-27 - UART2/ICM isolation checkpoint
+
+- ICM status `0x00010026` means address-phase NACK before `WHO_AM_I`; it is not an ID mismatch.
+- Fusion baseline and the prior failing branch have identical I2C0 PA0/PA1, 400 kHz timing, ICM/LIS3MDL drivers, and IMU priority.
+- This image only configures UART2 PB17/PB18 and leaves the UART2 NVIC disabled, isolating UART2 hardware configuration from protocol, task, and heap changes.
+
+## 2026-07-27 - Size-optimization boundary
+
+- Full communication runtime exceeded Flash by 0xF88 with baseline optimization.
+- `-Oz` is now limited to App and Algorithm groups, producing a 110536-byte Flash image; target/global optimization remains unset.
+- `app_imu.c` and `app_init.c` use `#pragma clang optimize off`; ICM Port files are not in optimized groups.

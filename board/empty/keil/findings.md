@@ -222,3 +222,10 @@
 
 - The previous `PATH_STATE_FUSION_ARMING` gate held the vehicle for up to 500 ms waiting for a fresh black-line frame, then raised `PATH_ERROR_GRAY_UNAVAILABLE`.
 - Fusion now starts in `PATH_STATE_REPLAY_TRACK` with diagnostic mode `STALE`; the normal runtime guard is the single source of truth for switching between path-only and blend.
+
+## 2026-07-27 - Vehicle link publication
+
+- Vehicle 1 is published as GitHub branch `big-car`; Vehicle 2 is published as `vehicle2`.
+- `VEHICLE_SYNC.md` is mirrored in both repository roots. It is the required registry for UART2 frame changes, node IDs, commands, task ownership, and joint test evidence.
+- Vehicle 1 source and UART2 port transport were present but not in the Keil compile list; both are now registered and the APP startup creates the communication task.
+- The non-IMU size-optimization policy remains active. Adding the link leaves Vehicle 1 at a verified 0-error/0-warning build; physical communication is not yet verified.

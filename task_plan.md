@@ -532,3 +532,13 @@ Status: implemented and Keil rebuild verified; on-target validation pending.
 
 - `path fusion start` enters continuous `app_path` tracking immediately, even when no black line has been detected.
 - Fresh grayscale data remains optional: it enables the existing forward/same-direction blend; no-line, stale, conflict, or reverse operation remains path-only without stopping the vehicle.
+
+## 2026-07-27 - Vehicle 1 branch and UART2 link
+
+Status: build verified; target link test pending.
+
+- Published this vehicle to GitHub branch `big-car` and added root `VEHICLE_SYNC.md` as the two-vehicle protocol/task record.
+- Registered `app_car_comm.c` and `port_car_uart.c` in Keil, initialized communication queues, and created the 5 ms `car_comm_task` on Vehicle 1 (node `0x01`).
+- Vehicle 2 is assigned node `0x02`; the shared contract reserves `0x01` for PING and `0xF0` for ACK.
+- Clean rebuild: Code=88032, RO-data=14356, RW-data=496, ZI-data=30392; 0 errors, 0 warnings.
+- On target: cross-wire UART2 PB17/TX to the peer PB18/RX with common GND, then run `comm ping 02` and validate ACK/receive counters.

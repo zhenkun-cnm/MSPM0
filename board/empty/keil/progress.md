@@ -304,3 +304,11 @@
 - [x] Keil clean rebuild: 0 errors, 0 warnings (Code=108600, RO=17660, RW=512, ZI=30080).
 - [ ] On target: start Fusion with no black line and confirm immediate `REPLAY_TRACK` motor output; then introduce a valid line and confirm `BLEND` only when directions agree.
 - Note: one initial inspection command had a PowerShell `${variable}:` interpolation parse error; the retry succeeded and no source files were changed by that failed command.
+
+## 2026-07-27 - Vehicle 1 communication publication
+
+- [x] Added `app_car_comm.c` and `port_car_uart.c` to the Vehicle 1 Keil project.
+- [x] Added `CarComm_Init()` and `car_comm_task` creation to Vehicle 1 startup.
+- [x] Created and published `big-car` / `vehicle2` GitHub branches with identical `VEHICLE_SYNC.md` protocol records.
+- [x] Vehicle 1 clean rebuild: 0 errors, 0 warnings (Code=88032, RO=14356, RW=496, ZI=30392).
+- [ ] On target: complete the two-vehicle UART2 wiring and bidirectional PING/custom-frame/ACK verification.

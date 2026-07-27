@@ -11,6 +11,7 @@
 #include "app_motor_encoder.h"
 #include "app_ins.h"
 #include "app_ins_cmd.h"
+#include "app_car_comm.h"
 #include "app_motion.h"
 #if 0 /* Navigation disabled to recover Flash; Path is independent. */
 #include "app_nav.h"
@@ -39,6 +40,7 @@
 #define MOTOR_ENC_TASK_STACK_WORDS   256U
 #define INS_TASK_STACK_WORDS         288U
 #define INS_CMD_TASK_STACK_WORDS     256U
+#define CAR_COMM_TASK_STACK_WORDS    192U
 #define MOTION_TASK_STACK_WORDS      192U
 #if 0 /* Navigation disabled */
 #define NAV_TASK_STACK_WORDS         160U
@@ -77,6 +79,7 @@ static TaskHandle_t s_tb6612TaskHandle = NULL;
 static TaskHandle_t s_motorEncoderTaskHandle = NULL;
 static TaskHandle_t s_insTaskHandle = NULL;
 static TaskHandle_t s_insCmdTaskHandle = NULL;
+static TaskHandle_t s_carCommTaskHandle = NULL;
 static TaskHandle_t s_motionTaskHandle = NULL;
 #if 0 /* Navigation disabled */
 static TaskHandle_t s_navTaskHandle = NULL;
@@ -168,6 +171,10 @@ static void start_task(void *pvParameters)
         LOGE(LOG_MOD_SYS, "drive mode queue create failed!\r\n");
     }
 
+    if (!CarComm_Init()) {
+        LOGE(LOG_MOD_SYS, "car comm queue create failed!\r\n");
+    }
+
 #if APP_TEST1_ENABLE
     g_test1CmdQueue = xQueueCreate(TEST1_CMD_QUEUE_LEN, sizeof(Test1_Command_t));
     if (g_test1CmdQueue == NULL) {
@@ -253,6 +260,15 @@ static void start_task(void *pvParameters)
                                    INS_CMD_TASK_STACK_WORDS);
     } else {
         LOGE(LOG_MOD_SYS, "INS cmd task create failed!\r\n");
+    }
+
+    if (xTaskCreate(car_comm_task,
+                    "car_comm",
+                    CAR_COMM_TASK_STACK_WORDS,
+                    NULL,
+                    2,
+                    &s_carCommTaskHandle) != pdPASS) {
+        LOGE(LOG_MOD_SYS, "car comm task create failed!\r\n");
     }
 
     if (xTaskCreate(motion_task,

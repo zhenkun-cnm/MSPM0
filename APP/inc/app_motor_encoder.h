@@ -10,15 +10,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "FreeRTOS.h"
+#include "app_vehicle_config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define MOTOR1_COUNTS_PER_OUTPUT_REV_NOMINAL  (1040L)
-#define MOTOR1_COUNTS_PER_OUTPUT_REV_CAL      (1054L)
-#define MOTOR2_COUNTS_PER_OUTPUT_REV_CAL      (1054L)
+#define MOTOR1_COUNTS_PER_OUTPUT_REV_NOMINAL  (VEHICLE_COUNTS_PER_OUTPUT_REV_NOMINAL)
+#define MOTOR1_COUNTS_PER_OUTPUT_REV_CAL      (VEHICLE_LEFT_COUNTS_PER_OUTPUT_REV_CAL)
+#define MOTOR2_COUNTS_PER_OUTPUT_REV_CAL      (VEHICLE_RIGHT_COUNTS_PER_OUTPUT_REV_CAL)
 #define MOTOR_ENC_PERIOD_MS                   (10U)
+
+/* Current chassis: 13-line Hall, 4x decoding, 1:28 reduction = 1456 counts/rev. */
 
 typedef struct {
     int32_t left_delta_counts;

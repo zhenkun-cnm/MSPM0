@@ -19,6 +19,8 @@
 #include "task.h"
 #include "port_log.h"
 
+/* Current encoder calibration is defined centrally in app_vehicle_config.h. */
+
 /* 全局变量: 每 10ms 脉冲增量 */
 int32_t g_motorPulseCount  = 0;
 int32_t g_motor2PulseCount = 0;

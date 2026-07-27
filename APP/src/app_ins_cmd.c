@@ -3,6 +3,9 @@
  * @brief   UART line command parser for INS debug control.
  */
 #include "app_ins_cmd.h"
+#if 0 /* Dual-car communication is disabled to recover Flash. */
+#include "app_car_comm.h"
+#endif
 #include "app_ins.h"
 #include "app_motion.h"
 #include "app_nav.h"
@@ -11,6 +14,7 @@
 #include "app_gray_line.h"
 #include "app_drive_mode.h"
 #include "app_motor_encoder.h"
+#include "app_vehicle_config.h"
 #include "app_tb6612.h"
 #include "app_test1.h"
 #include "dev_uart_rx.h"
@@ -25,7 +29,6 @@
 #define INS_CMD_TASK_PERIOD_MS  10U
 #define INS_CMD_LINE_MAX        80U
 #define SPEEDTEST_PRINT_MS      100U
-#define SPEEDTEST_WHEEL_CIRCUM_UM 150796L
 
 typedef enum {
     SPEEDTEST_MODE_FORWARD = 0,
@@ -285,7 +288,7 @@ static int32_t speedtest_counts_to_mmps(int32_t counts,
         return 0;
     }
 
-    num = (int64_t)counts * (int64_t)SPEEDTEST_WHEEL_CIRCUM_UM;
+    num = (int64_t)counts * (int64_t)VEHICLE_WHEEL_CIRCUMFERENCE_UM;
     num /= (int64_t)counts_per_rev;
     num /= (int64_t)dt_ms;
     return (int32_t)num;
@@ -609,6 +612,173 @@ static bool parse_two_long_args(const char *text, long *a, long *b)
     }
     return *end == '\0';
 }
+
+static char *next_word(char **cursor)
+{
+    char *word;
+
+    if (cursor == NULL || *cursor == NULL) {
+        return NULL;
+    }
+
+    while (**cursor == ' ' || **cursor == '\t') {
+        (*cursor)++;
+    }
+    if (**cursor == '\0') {
+        return NULL;
+    }
+
+    word = *cursor;
+    while (**cursor != '\0' && **cursor != ' ' && **cursor != '\t') {
+        (*cursor)++;
+    }
+    if (**cursor != '\0') {
+        *(*cursor)++ = '\0';
+    }
+    return word;
+}
+
+#if 0 /* Dual-car CLI commands are disabled with the communication module. */
+static bool parse_hex_byte(const char *text, uint8_t *value)
+{
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (text == NULL || value == NULL) {
+        return false;
+    }
+
+    parsed = strtoul(text, &end, 16);
+    if (end == text || *end != '\0' || parsed > 0xFFUL) {
+        return false;
+    }
+
+    *value = (uint8_t)parsed;
+    return true;
+}
+
+static void comm_print_status(void)
+{
+    CarComm_Stats_t stats;
+
+    CarComm_GetStats(&stats);
+    LOGI_RELIABLE(LOG_MOD_CLI,
+                  "comm tx=%lu ack=%lu retry=%lu timeout=%lu uart_ovf=%lu\r\n",
+                  (unsigned long)stats.txFrames,
+                  (unsigned long)stats.txAcked,
+                  (unsigned long)stats.txRetries,
+                  (unsigned long)stats.txTimeouts,
+                  (unsigned long)stats.uartRxOverflow);
+    LOGI_RELIABLE(LOG_MOD_CLI,
+                  "comm rx=%lu dup=%lu qfull=%lu xor=%lu len=%lu tail=%lu dst=%lu fto=%lu\r\n",
+                  (unsigned long)stats.rxFrames,
+                  (unsigned long)stats.rxDuplicates,
+                  (unsigned long)stats.rxQueueFull,
+                  (unsigned long)stats.rxBadChecksum,
+                  (unsigned long)stats.rxBadLength,
+                  (unsigned long)stats.rxBadTail,
+                  (unsigned long)stats.rxWrongDestination,
+                  (unsigned long)stats.rxFrameTimeouts);
+}
+
+static void comm_print_received(void)
+{
+    CarComm_Message_t message;
+    char dataText[(CAR_COMM_MAX_DATA_LEN * 3U) + 1U];
+    const char hex[] = "0123456789ABCDEF";
+    uint8_t i;
+    uint8_t index = 0U;
+
+    if (!CarComm_Receive(&message, 0U)) {
+        LOGI_RELIABLE(LOG_MOD_CLI, "comm rx empty\r\n");
+        return;
+    }
+
+    for (i = 0U; i < message.len; i++) {
+        dataText[index++] = hex[(message.data[i] >> 4U) & 0x0FU];
+        dataText[index++] = hex[message.data[i] & 0x0FU];
+        if ((uint8_t)(i + 1U) < message.len) {
+            dataText[index++] = ' ';
+        }
+    }
+    dataText[index] = '\0';
+
+    LOGI_RELIABLE(LOG_MOD_CLI,
+                  "comm rx seq=%u src=%u dst=%u cmd=%02X len=%u data=%s\r\n",
+                  (unsigned)message.seq,
+                  (unsigned)message.srcId,
+                  (unsigned)message.dstId,
+                  (unsigned)message.cmd,
+                  (unsigned)message.len,
+                  dataText);
+}
+
+static bool handle_comm_command(char *line)
+{
+    char *cursor;
+    char *token;
+    uint8_t dst;
+    uint8_t cmd;
+    uint8_t data[CAR_COMM_MAX_DATA_LEN];
+    uint8_t len = 0U;
+
+    if (str_eq(line, "comm help")) {
+        LOGI_RELIABLE(LOG_MOD_CLI,
+                      "comm: status|ping <dst_hex>|send <dst_hex> <cmd_hex> [data_hex...]|recv\r\n");
+        return true;
+    }
+    if (str_eq(line, "comm status")) {
+        comm_print_status();
+        return true;
+    }
+    if (str_eq(line, "comm recv")) {
+        comm_print_received();
+        return true;
+    }
+    if (str_prefix(line, "comm ping ")) {
+        cursor = line + strlen("comm ping ");
+        token = next_word(&cursor);
+        if (token != NULL && next_word(&cursor) == NULL && parse_hex_byte(token, &dst) &&
+            CarComm_Send(dst, CAR_COMM_PING_CMD, NULL, 0U, true)) {
+            LOGI_RELIABLE(LOG_MOD_CLI, "comm ping queued dst=%u\r\n", (unsigned)dst);
+        } else {
+            LOGI_RELIABLE(LOG_MOD_CLI, "usage: comm ping <dst_hex>\r\n");
+        }
+        return true;
+    }
+    if (str_prefix(line, "comm send ")) {
+        cursor = line + strlen("comm send ");
+        token = next_word(&cursor);
+        if (token == NULL || !parse_hex_byte(token, &dst)) {
+            LOGI_RELIABLE(LOG_MOD_CLI, "usage: comm send <dst_hex> <cmd_hex> [data_hex...]\r\n");
+            return true;
+        }
+        token = next_word(&cursor);
+        if (token == NULL || !parse_hex_byte(token, &cmd) || cmd == CAR_COMM_ACK_CMD) {
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: command must be 00..EF\r\n");
+            return true;
+        }
+        while ((token = next_word(&cursor)) != NULL) {
+            if (len >= CAR_COMM_MAX_DATA_LEN || !parse_hex_byte(token, &data[len])) {
+                LOGI_RELIABLE(LOG_MOD_CLI, "error: data must be 00..FF, max 20 bytes\r\n");
+                return true;
+            }
+            len++;
+        }
+        if (CarComm_Send(dst, cmd, data, len, true)) {
+            LOGI_RELIABLE(LOG_MOD_CLI,
+                          "comm send queued dst=%u cmd=%02X len=%u\r\n",
+                          (unsigned)dst, (unsigned)cmd, (unsigned)len);
+        } else {
+            LOGI_RELIABLE(LOG_MOD_CLI, "error: comm queue not ready or full\r\n");
+        }
+        return true;
+    }
+
+    LOGI_RELIABLE(LOG_MOD_CLI, "try: comm help\r\n");
+    return true;
+}
+#endif
 
 static void parse_line(char *line)
 {

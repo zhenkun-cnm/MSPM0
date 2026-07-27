@@ -6,6 +6,7 @@
 #include "app_gray.h"
 #include "app_imu.h"
 #include "app_motor_encoder.h"
+#include "app_vehicle_config.h"
 #include "app_motion.h"
 #include "app_tb6612.h"
 #include "app_drive_mode.h"
@@ -21,8 +22,6 @@
 #define GRAYLINE_TASK_PERIOD_MS      10U
 #define GRAYLINE_TELEMETRY_DIVIDER   2U
 #define GRAYLINE_TARGET_POS          0.0f
-#define GRAYLINE_WHEEL_CIRCUM_M      (3.14159265358979323846f * 0.048f)
-#define GRAYLINE_WHEEL_BASE_M        0.125f
 #define GRAYLINE_RAD_TO_DEG          57.2957795130823208768f
 #define GRAYLINE_GYRO_Z_SIGN         1.0f
 #define GRAYLINE_RATE_LP_ALPHA       0.35f
@@ -35,11 +34,11 @@
 
 QueueHandle_t g_grayLineCmdQueue = NULL;
 GrayLine_PidConfig_t g_grayLinePid = {
-    0.016f,
+    0.012f,
     0.0f,
     0.001f,
     0.20f,
-    0.08f,
+    0.1f,
     300.0f,
     4.0f,
     0.06f,
@@ -126,7 +125,7 @@ static float grayline_lowpass(float input, float previous, float alpha)
 
 static float grayline_turn_to_rate_dps(float turn_mps)
 {
-    return (2.0f * turn_mps * GRAYLINE_RAD_TO_DEG) / GRAYLINE_WHEEL_BASE_M;
+    return (2.0f * turn_mps * GRAYLINE_RAD_TO_DEG) / VEHICLE_WHEEL_TRACK_M;
 }
 
 static bool grayline_read_yaw_rate_dps(float *rate_dps)
@@ -234,7 +233,7 @@ static float grayline_counts_to_mps(int32_t counts, float counts_per_rev, float 
     if (dt <= 0.0f) {
         return 0.0f;
     }
-    return (((float)counts / counts_per_rev) * GRAYLINE_WHEEL_CIRCUM_M) / dt;
+    return (((float)counts / counts_per_rev) * VEHICLE_WHEEL_CIRCUMFERENCE_M) / dt;
 }
 
 static bool grayline_read_wheel_speeds(GrayLine_Runtime_t *rt,

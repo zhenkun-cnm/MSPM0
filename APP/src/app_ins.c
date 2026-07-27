@@ -5,6 +5,7 @@
 #include "app_ins.h"
 #include "app_imu.h"
 #include "app_motor_encoder.h"
+#include "app_vehicle_config.h"
 #include "dev_flash.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -70,11 +71,6 @@ void INS_Pose_Write(const INS_Pose_t *in)
 #define INS_PRINT_PERIOD_MS            100U
 #define INS_FLASH_LOG_PERIOD_MS        200U
 
-#define INS_WHEEL_DIAMETER_M           0.048f
-#define INS_WHEEL_BASE_M               0.125f
-#define INS_PI_F                       3.14159265358979323846f
-#define INS_WHEEL_CIRCUMFERENCE_M      (INS_PI_F * INS_WHEEL_DIAMETER_M)
-
 #define INS_LEFT_SIGN                  (1.0f)
 #define INS_RIGHT_SIGN                 (1.0f)
 #define INS_IMU_YAW_SIGN               (1.0f)
@@ -134,7 +130,7 @@ static int16_t clamp_i16_from_i32(int32_t v)
 
 static float counts_to_m(int32_t counts, float countsPerRev, float sign)
 {
-    return sign * ((float)counts / countsPerRev) * INS_WHEEL_CIRCUMFERENCE_M;
+    return sign * ((float)counts / countsPerRev) * VEHICLE_WHEEL_CIRCUMFERENCE_M;
 }
 
 static void update_flags(INS_Pose_t *pose,
@@ -562,15 +558,15 @@ void ins_task(void *pvParameters)
                 yawDeg = wrap_180((imu.yaw - yawZero) * INS_IMU_YAW_SIGN);
                 imuValid = true;
             } else if (frameCount > 0) {
-                float dyawWheelRad = (rightStep - leftStep) / INS_WHEEL_BASE_M;
-                yawDeg = wrap_180(pose.yaw_deg + dyawWheelRad * (180.0f / INS_PI_F));
+                float dyawWheelRad = (rightStep - leftStep) / VEHICLE_WHEEL_TRACK_M;
+                yawDeg = wrap_180(pose.yaw_deg + dyawWheelRad * (180.0f / VEHICLE_PI_F));
                 yawSource = 'W';
             }
         }
 
         yawForStep = pose.yaw_deg + wrap_180(yawDeg - pose.yaw_deg) * 0.5f;
-        pose.x_m += ds * cosf(yawForStep * (INS_PI_F / 180.0f));
-        pose.y_m += ds * sinf(yawForStep * (INS_PI_F / 180.0f));
+        pose.x_m += ds * cosf(yawForStep * (VEHICLE_PI_F / 180.0f));
+        pose.y_m += ds * sinf(yawForStep * (VEHICLE_PI_F / 180.0f));
         pose.left_m += leftStep;
         pose.right_m += rightStep;
         pose.yaw_deg = yawDeg;

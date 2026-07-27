@@ -12,7 +12,9 @@
 #include "app_ins.h"
 #include "app_ins_cmd.h"
 #include "app_motion.h"
+#if 0 /* Navigation disabled to recover Flash; Path is independent. */
 #include "app_nav.h"
+#endif
 #include "app_path.h"
 #include "app_gray.h"
 #include "app_gray_line.h"
@@ -38,7 +40,9 @@
 #define INS_TASK_STACK_WORDS         288U
 #define INS_CMD_TASK_STACK_WORDS     256U
 #define MOTION_TASK_STACK_WORDS      192U
+#if 0 /* Navigation disabled */
 #define NAV_TASK_STACK_WORDS         160U
+#endif
 #define PATH_TASK_STACK_WORDS        384U
 #define GRAY_TASK_STACK_WORDS        154U
 #define GRAYLINE_TASK_STACK_WORDS    192U
@@ -56,7 +60,9 @@ extern void motor_encoder_task(void *pvParameters);
 extern void ins_task(void *pvParameters);
 extern void ins_cmd_task(void *pvParameters);
 extern void motion_task(void *pvParameters);
+#if 0 /* Navigation disabled */
 extern void nav_task(void *pvParameters);
+#endif
 extern void path_task(void *pvParameters);
 extern void gray_task(void *pvParameters);
 extern void grayline_task(void *pvParameters);
@@ -72,7 +78,9 @@ static TaskHandle_t s_motorEncoderTaskHandle = NULL;
 static TaskHandle_t s_insTaskHandle = NULL;
 static TaskHandle_t s_insCmdTaskHandle = NULL;
 static TaskHandle_t s_motionTaskHandle = NULL;
+#if 0 /* Navigation disabled */
 static TaskHandle_t s_navTaskHandle = NULL;
+#endif
 static TaskHandle_t s_pathTaskHandle = NULL;
 static TaskHandle_t s_grayTaskHandle = NULL;
 static TaskHandle_t s_grayLineTaskHandle = NULL;
@@ -137,10 +145,13 @@ static void start_task(void *pvParameters)
         LOGE(LOG_MOD_SYS, "motion cmd queue create failed!\r\n");
     }
 
+#if 0 /* Navigation disabled */
     g_navCmdQueue = xQueueCreate(NAV_CMD_QUEUE_LEN, sizeof(Nav_Command_t));
     if (g_navCmdQueue == NULL) {
         LOGE(LOG_MOD_SYS, "nav cmd queue create failed!\r\n");
     }
+
+#endif
 
     g_pathCmdQueue = xQueueCreate(PATH_CMD_QUEUE_LEN, sizeof(Path_Command_t));
     if (g_pathCmdQueue == NULL) {
@@ -257,6 +268,7 @@ static void start_task(void *pvParameters)
         LOGE(LOG_MOD_SYS, "motion task create failed!\r\n");
     }
 
+#if 0 /* Navigation disabled */
     if (xTaskCreate(nav_task,
                     "nav",
                     NAV_TASK_STACK_WORDS,
@@ -269,6 +281,8 @@ static void start_task(void *pvParameters)
     } else {
         LOGE(LOG_MOD_SYS, "nav task create failed!\r\n");
     }
+
+#endif
 
     if (xTaskCreate(path_task,
                     "path",

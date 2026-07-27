@@ -203,6 +203,17 @@ static const char *path_state_name(Path_State_t state)
     }
 }
 
+static const char *path_fusion_mode_name(uint8_t mode)
+{
+    switch (mode) {
+        case PATH_FUSION_MODE_PATH_ONLY: return "PATH_ONLY";
+        case PATH_FUSION_MODE_BLEND:     return "BLEND";
+        case PATH_FUSION_MODE_STALE:     return "STALE";
+        case PATH_FUSION_MODE_REVERSE:   return "REVERSE";
+        default:                         return "?";
+    }
+}
+
 static const char *path_motion_result_name(Motion_Result_t result)
 {
     switch (result) {
@@ -1158,6 +1169,8 @@ static void path_update_track(Path_Runtime_t *rt)
     float gray_trim = 0.0f;
     float path_trim;
     GrayLine_Status_t gray_status;
+    bool gray_status_ok = false;
+    uint32_t gray_age_ms = 0xFFFFFFFFUL;
     float left_pwm_raw;                                   /*!< 未限幅的左轮目标 PWM */
     float right_pwm_raw;                                  /*!< 未限幅的右轮目标 PWM */
     float left_pwm_f;                                     /*!< 缓变后的左轮 PWM（浮点中间值） */
@@ -1290,12 +1303,16 @@ static void path_update_track(Path_Runtime_t *rt)
     rt->fusion_final_trim_pwm = path_trim;
     rt->fusion_mode = PATH_FUSION_MODE_PATH_ONLY;
     if (rt->fusion_active) {
+        gray_status_ok = GrayLine_ReadStatus(&gray_status);
+        if (gray_status_ok) {
+            gray_age_ms = (uint32_t)((xTaskGetTickCount() * portTICK_PERIOD_MS) -
+                                     gray_status.sample_tick);
+        }
         if (reverse_segment) {
             rt->fusion_mode = PATH_FUSION_MODE_REVERSE;
-        } else if (GrayLine_ReadStatus(&gray_status) &&
+        } else if (gray_status_ok &&
                    gray_status.path_assist_active && gray_status.line_fresh &&
-                   (((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) -
-                     gray_status.sample_tick) <= PATH_FUSION_GRAY_MAX_AGE_MS)) {
+                   (gray_age_ms <= PATH_FUSION_GRAY_MAX_AGE_MS)) {
             gray_trim = path_clamp_f32(gray_status.pos_turn_ff_mps *
                                        g_pathFusionConfig.gray_turn_to_pwm,
                                        -g_pathFusionConfig.gray_trim_max_pwm,
@@ -1375,6 +1392,20 @@ static void path_update_track(Path_Runtime_t *rt)
     if (rt->track_last_log_tick == 0U ||                                                /* 首次 或 距上次 >= 500ms */
         ((uint32_t)((now - rt->track_last_log_tick) * portTICK_PERIOD_MS) >= PATH_TRACK_LOG_PERIOD_MS)) {
         rt->track_last_log_tick = now;
+        if (rt->fusion_active) {
+            LOGI(LOG_MOD_PATH,
+                 "[FUSION] mode=%s active=%u assist=%u fresh=%u age=%lums mask=0x%02X rev=%u gray=%+.2f path=%+.2f final=%+.2f\r\n",
+                 path_fusion_mode_name(rt->fusion_mode),
+                 rt->fusion_active ? 1U : 0U,
+                 (gray_status_ok && gray_status.path_assist_active) ? 1U : 0U,
+                 (gray_status_ok && gray_status.line_fresh) ? 1U : 0U,
+                 (unsigned long)gray_age_ms,
+                 gray_status_ok ? (unsigned)gray_status.active_mask : 0U,
+                 reverse_segment ? 1U : 0U,
+                 rt->fusion_gray_trim_pwm,
+                 rt->fusion_path_trim_pwm,
+                 rt->fusion_final_trim_pwm);
+        }
         LOGD(LOG_MOD_PATH, "idx=%u/%u seg=%u->%u dir=%c recYaw=%+.1f move=%+.1f segErr=%+.1f track=%+.1f herr=%+.1f rawTrim=%+.2f trim=%+.2f rawPwm=%.1f/%.1f pwm=%d/%d X=%+.3f Y=%+.3f YAW=%+.1f\r\n",
                             (unsigned)rt->track_target_index,                           /* 目标点索引 */
                             (unsigned)s_pathCount,                                      /* 总点数 */

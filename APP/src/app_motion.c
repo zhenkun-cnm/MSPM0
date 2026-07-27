@@ -5,6 +5,7 @@
 #include "app_motion.h"
 #include "app_ins.h"
 #include "app_motor_encoder.h"
+#include "app_vehicle_config.h"
 #include "app_tb6612.h"
 #include "dev_tb6612.h"
 #include "port_log.h"
@@ -36,10 +37,6 @@
 #define MOTION_PID_INTEGRAL_LIMIT   50.0f
 
 #define DEG_TO_RAD                  0.01745329252f
-#define MOTION_PI_F                 3.14159265358979323846f
-#define MOTION_WHEEL_BASE_M         0.125f
-#define MOTION_WHEEL_DIAMETER_M     0.048f
-#define MOTION_WHEEL_CIRCUM_M       (MOTION_PI_F * MOTION_WHEEL_DIAMETER_M)
 #define MOTION_STRAIGHT_BASE_MPS    0.12f
 #define MOTION_ARC_CENTER_MPS       0.1f
 #define MOTION_YAW_TRIM_TO_MPS      0.006f
@@ -164,7 +161,7 @@ static float motion_counts_to_mps(int32_t counts, float counts_per_rev, float dt
     if (dt <= 0.0f) {
         return 0.0f;
     }
-    return (((float)counts / counts_per_rev) * MOTION_WHEEL_CIRCUM_M) / dt;
+    return (((float)counts / counts_per_rev) * VEHICLE_WHEEL_CIRCUMFERENCE_M) / dt;
 }
 
 static void motion_reset_speed_pid(Motion_Runtime_t *rt)
@@ -689,9 +686,9 @@ static bool motion_start_arc(Motion_Runtime_t *rt, float radius_m, float angle_d
     }
 
     inner_mps = MOTION_ARC_CENTER_MPS *
-                ((radius_m - (MOTION_WHEEL_BASE_M * 0.5f)) / radius_m);
+                ((radius_m - (VEHICLE_WHEEL_TRACK_M * 0.5f)) / radius_m);
     outer_mps = MOTION_ARC_CENTER_MPS *
-                ((radius_m + (MOTION_WHEEL_BASE_M * 0.5f)) / radius_m);
+                ((radius_m + (VEHICLE_WHEEL_TRACK_M * 0.5f)) / radius_m);
 
     motion_mark_accepted(rt, cmd_id);
     motion_ack_accept(cmd_id, MOTION_CMD_ARC, radius_m);

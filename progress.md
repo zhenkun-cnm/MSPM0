@@ -470,3 +470,10 @@ if (ret == pdPASS) {
 - [x] Restored 20 KiB heap, 160-point path capacity, and delayed Flash/monitor startup to avoid task-creation failures.
 - [x] Keil clean rebuild: 0 errors, 0 warnings (Code=94280, RO=15748, RW=508, ZI=30868).
 - [ ] On target: test ICM after download/reset/power cycle; then test bidirectional ping, send/receive, ACK retry, and `comm status`.
+
+## 2026-07-27 - Vehicle 2 publication record
+
+- [x] Configured the Vehicle 2 App build with `CAR_COMM_NODE_ID=2U`.
+- [x] Added identical `VEHICLE_SYNC.md` records to both vehicle branches and pushed `vehicle2` with `big-car` as its peer branch.
+- [x] Verified the Vehicle 2 Keil build: 0 errors, 0 warnings (Code=94280, RO=15748, RW=508, ZI=30868).
+- [ ] On target: validate the shared UART2 protocol with Vehicle 1 and record `comm status` counters in `VEHICLE_SYNC.md`.

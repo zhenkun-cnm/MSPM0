@@ -234,3 +234,10 @@
 - Full communication runtime exceeded Flash by 0xF88 with baseline optimization.
 - `-Oz` is now limited to App and Algorithm groups, producing a 110536-byte Flash image; target/global optimization remains unset.
 - `app_imu.c` and `app_init.c` use `#pragma clang optimize off`; ICM Port files are not in optimized groups.
+
+## 2026-07-27 - Vehicle 2 protocol identity
+
+- Vehicle 2 is published as GitHub branch `vehicle2`; Vehicle 1 is `big-car` in the same target repository.
+- The shared `VEHICLE_SYNC.md` fixes the wire contract: UART2 115200, node IDs `0x01`/`0x02`, PING `0x01`, ACK `0xF0`, 20-byte maximum payload, and XOR-protected framing.
+- `CAR_COMM_NODE_ID=2U` is an App-group Keil compiler definition, so the shared source header keeps its default node value without causing an ID collision.
+- Vehicle 1's 8-entry queues and Vehicle 2's 2-entry queues are local buffering choices, not a protocol mismatch.

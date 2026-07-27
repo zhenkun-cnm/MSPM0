@@ -553,3 +553,13 @@ Status: clean-build verified; on-target verification pending.
 - Heap is 20 KiB, path capacity is 160 points, and Flash/stack monitor tasks start after a 100 ms software-timer delay.
 - Clean Keil rebuild passed: Code=94280, RO-data=15748, RW-data=508, ZI-data=30868; 0 errors, 0 warnings.
 - Next action: test ICM across download/reset/power cycle and test bidirectional `comm ping`, `comm send`, `comm recv`, and `comm status` with two vehicles.
+
+## 2026-07-27 - Vehicle 2 branch and protocol synchronization
+
+Status: build verified; target link test pending.
+
+- Published this vehicle to GitHub branch `vehicle2`; Vehicle 1 is published as branch `big-car`.
+- Added mirrored root `VEHICLE_SYNC.md` as the mandatory two-vehicle protocol, task, and test record.
+- The Vehicle 2 App compilation group defines `CAR_COMM_NODE_ID=2U`; Vehicle 1 uses node `0x01`.
+- Clean rebuild remains: Code=94280, RO-data=15748, RW-data=508, ZI-data=30868; 0 errors, 0 warnings.
+- On target: validate `comm ping 01`, `comm send 01 10 55`, `comm recv`, ACK/retry counters, and ICM initialization across reset/power cycle.

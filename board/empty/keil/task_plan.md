@@ -374,3 +374,12 @@ Status: clean-build verified; on-target verification pending.
 - `-Oz` is limited to App and Algorithm groups; the target/global option is empty and Port I2C files remain default optimized.
 - Heap=20 KiB, path capacity=160, and Flash/monitor startup is delayed 100 ms.
 - Clean Keil rebuild: Code=94280, RO=15748, RW=508, ZI=30868; 0 errors, 0 warnings.
+
+## 2026-07-27 - Vehicle 2 branch and protocol synchronization
+
+Status: build verified; target link test pending.
+
+- Published this vehicle to GitHub branch `vehicle2`; Vehicle 1 is published as branch `big-car`.
+- Added mirrored root `VEHICLE_SYNC.md` as the mandatory two-vehicle protocol, task, and test record.
+- The Vehicle 2 App compilation group defines `CAR_COMM_NODE_ID=2U`; Vehicle 1 uses node `0x01`.
+- On target: validate `comm ping 01`, `comm send 01 10 55`, `comm recv`, ACK/retry counters, and ICM initialization across reset/power cycle.

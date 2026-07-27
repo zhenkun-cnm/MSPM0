@@ -2,7 +2,7 @@
 
 ## Sync status
 
-- Sync revision: `1`
+- Sync revision: `2`
 - Vehicle 1 repository: `big-car` (`C:\ti\mspm0_project_big_car`)
 - Vehicle 2 repository: `vehicle2` (`C:\ti\mspm0_project`)
 - Protocol state: `BUILD_VERIFIED_TARGET_TEST_PENDING`
@@ -49,6 +49,13 @@ No unregistered command may be implemented or transmitted as a business message.
 - Queue depth is local buffering, not a wire-protocol requirement.
 - Vehicle 1 build: `Code=88032 RO=14356 RW=496 ZI=30392`, 0 Error / 0 Warning.
 - Vehicle 2 build: `Code=94280 RO=15748 RW=508 ZI=30868`, 0 Error / 0 Warning.
+
+## Vehicle 2 release record
+
+- Firmware source commit: `8ede22b` (`feat: configure vehicle 2 communication link`).
+- Release branch: `vehicle2`; target remote: `github-target` (`https://github.com/zhenkun-xianren/MSPM0.git`).
+- Keil clean rebuild (2026-07-27): `Code=94280 RO=15748 RW=508 ZI=30868`, 0 Error / 0 Warning.
+- Pending integration: cross-wire UART2 with common ground; run `comm ping 02` and `comm send 01 10 55`; confirm ACK, receive, and retry counters on both vehicles. Also capture Vehicle 2 boot evidence reporting node ID 2 and UART2 ready.
 
 ## Update rules
 

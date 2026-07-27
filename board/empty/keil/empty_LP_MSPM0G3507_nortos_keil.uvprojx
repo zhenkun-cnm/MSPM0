@@ -468,6 +468,15 @@
         </Group>
         <Group>
           <GroupName>App/Src</GroupName>
+          <GroupOption>
+            <GroupArmAds>
+              <Cads>
+                <VariousControls>
+                  <MiscControls>-Oz</MiscControls>
+                </VariousControls>
+              </Cads>
+            </GroupArmAds>
+          </GroupOption>
           <Files>
             <File>
               <FileName>app_button.c</FileName>
@@ -495,11 +504,6 @@
               <FilePath>..\..\..\APP\src\app_flash.c</FilePath>
             </File>
             <File>
-              <FileName>app_imu.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\..\APP\src\app_imu.c</FilePath>
-            </File>
-            <File>
               <FileName>app_tft.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_tft.c</FilePath>
@@ -515,19 +519,9 @@
               <FilePath>..\..\..\APP\src\app_motor_encoder.c</FilePath>
             </File>
             <File>
-              <FileName>app_ins.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\..\APP\src\app_ins.c</FilePath>
-            </File>
-            <File>
               <FileName>app_ins_cmd.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_ins_cmd.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_motion.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\..\APP\src\app_motion.c</FilePath>
             </File>
             <File>
               <FileName>app_nav.c</FileName>
@@ -550,11 +544,6 @@
               <FilePath>..\..\..\APP\src\app_gray.c</FilePath>
             </File>
             <File>
-              <FileName>app_gray_line.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\..\APP\src\app_gray_line.c</FilePath>
-            </File>
-            <File>
               <FileName>app_stack_monitor.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_stack_monitor.c</FilePath>
@@ -563,6 +552,31 @@
               <FileName>app_test1.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\APP\src\app_test1.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>App/IMU RT</GroupName>
+          <Files>
+            <File>
+              <FileName>app_imu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_imu.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ins.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_ins.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_motion.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_motion.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_gray_line.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\APP\src\app_gray_line.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -578,6 +592,15 @@
         </Group>
         <Group>
           <GroupName>Port/Src</GroupName>
+          <GroupOption>
+            <GroupArmAds>
+              <Cads>
+                <VariousControls>
+                  <MiscControls>-Oz</MiscControls>
+                </VariousControls>
+              </Cads>
+            </GroupArmAds>
+          </GroupOption>
           <Files>
             <File>
               <FileName>port_button.c</FileName>
@@ -610,11 +633,6 @@
               <FilePath>..\port\src\port_flash.c</FilePath>
             </File>
             <File>
-              <FileName>port_imu.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\port\src\port_imu.c</FilePath>
-            </File>
-            <File>
               <FileName>port_tft.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\port\src\port_tft.c</FilePath>
@@ -640,11 +658,6 @@
               <FilePath>..\port\src\port_hardfault.c</FilePath>
             </File>
             <File>
-              <FileName>port_lis3mdl.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\port\src\port_lis3mdl.c</FilePath>
-            </File>
-            <File>
               <FileName>port_uart_rx.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\port\src\port_uart_rx.c</FilePath>
@@ -653,6 +666,21 @@
               <FileName>port_gray.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\port\src\port_gray.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Port/IMU RT</GroupName>
+          <Files>
+            <File>
+              <FileName>port_imu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_imu.c</FilePath>
+            </File>
+            <File>
+              <FileName>port_lis3mdl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\port\src\port_lis3mdl.c</FilePath>
             </File>
           </Files>
         </Group>
